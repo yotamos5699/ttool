@@ -34,8 +34,10 @@ import { Badge } from "@/components/ui/badge";
 import { InlineText } from "@/components/inline-edit/InlineText";
 import { JobNode } from "./JobNode";
 import { cn } from "@/lib/utils";
-import { usePlanStore, type Stage } from "@/stores/planStore";
+import { usePlanDataStore, useUIStore, Stage } from "@/stores/plan";
 import { usePlanMutations } from "@/hooks/usePlanMutations";
+import { handlePointerDown, useNodeStyle } from "./helper";
+import { NodeStyleMarker } from "./NodeStyleMarker";
 
 type StageNodeProps = {
   stage: Stage;
@@ -44,23 +46,23 @@ type StageNodeProps = {
 
 export function StageNode({ stage, depth }: StageNodeProps) {
   // Get state from store
-  const blastRadiusByPlan = usePlanStore((s) => s.blastRadiusByPlan);
-  const selectedNodesByPlan = usePlanStore((s) => s.selectedNodesByPlan);
-  const selectNode = usePlanStore((s) => s.selectNode);
-  const planId = usePlanStore((s) => s.plan?.id ?? 0);
-  const allExpanded = usePlanStore((s) => s.allExpanded);
-  const openStagesByPlan = usePlanStore((s) => s.openStagesByPlan);
-  const setStageOpen = usePlanStore((s) => s.setStageOpen);
+  // const blastRadiusByPlan = useUIStore((s) => s.blastRadiusByPlan);
+  // const selectedNodesByPlan = useUIStore((s) => s.selectedNodesByPlan);
+
+  const planId = usePlanDataStore((s) => s.plan?.id ?? 0);
+  const allExpanded = useUIStore((s) => s.allExpanded);
+  const openStagesByPlan = useUIStore((s) => s.openStagesByPlan);
+  const setStageOpen = useUIStore((s) => s.setStageOpen);
 
   const { updateStage } = usePlanMutations(planId);
 
   const hasChildren =
     (stage.childStages?.length || 0) > 0 || (stage.jobs?.length || 0) > 0;
-  const selectedNodes = selectedNodesByPlan[planId] || [];
-  const blastRadius = blastRadiusByPlan[planId] || [];
-  const nodeKey = `stage:${stage.id}` as const;
-  const isSelected = selectedNodes.includes(nodeKey);
-  const isAffected = blastRadius.includes(nodeKey);
+  // const selectedNodes = selectedNodesByPlan[planId] || [];
+  // const blastRadius = blastRadiusByPlan[planId] || [];
+  // const nodeKey = `stage:${stage.id}` as const;
+  // const isSelected = selectedNodes.includes(nodeKey);
+  // const isAffected = blastRadius.includes(nodeKey);
 
   // Filter to root jobs only (no parent)
   const rootJobs = stage.jobs?.filter((j) => !j.parentJobId) || [];
@@ -79,41 +81,16 @@ export function StageNode({ stage, depth }: StageNodeProps) {
       <ContextMenu>
         <ContextMenuTrigger asChild>
           <div
-            className={cn(
-              "flex items-center gap-2 py-1.5 px-2 rounded-md cursor-pointer group",
-              "hover:bg-muted/50 transition-colors",
-              isSelected && "bg-primary/10 border border-primary/40",
-              isAffected && "",
-              // isSelected && "bg-primary/10 border border-primary/40",
-              // isAffected && "ring-2 ring-warning/50 bg-warning/5 blast-radius",
-            )}
+            className={
+              " relative flex items-center gap-2 py-1.5 px-2 rounded-md cursor-pointer group transition-colors"
+            }
+            // className={useNodeStyle(planId, stage.id, "stage")}
             style={{ marginLeft: depth * 20 }}
             onPointerDown={(event) => {
-              if (event.shiftKey) {
-                event.preventDefault();
-                selectNode({
-                  planId,
-                  type: "stage",
-                  id: stage.id,
-                  mode: "add",
-                  setPrimary: false,
-                });
-                return;
-              }
-              if (event.ctrlKey || event.metaKey) {
-                event.preventDefault();
-                selectNode({
-                  planId,
-                  type: "stage",
-                  id: stage.id,
-                  mode: "toggle",
-                  setPrimary: false,
-                });
-                return;
-              }
-              // selectNode({ planId, type: "stage", id: stage.id, mode: "replace" });
+              handlePointerDown(event, planId, stage.id, "stage");
             }}
           >
+            <NodeStyleMarker nodeId={stage.id} planId={planId} type="stage" />
             {/* Expand/Collapse */}
             <CollapsibleTrigger asChild>
               <Button
@@ -204,8 +181,9 @@ export function StageNode({ stage, depth }: StageNodeProps) {
 }
 
 function StageContextMenu({ stage }: { stage: Stage }) {
-  const planId = usePlanStore((s) => s.plan?.id ?? 0);
-  const selectNode = usePlanStore((s) => s.selectNode);
+  const plan = usePlanDataStore((s) => s.plan);
+  const planId = plan?.id ?? 0;
+  const selectNode = useUIStore((s) => s.selectNode);
 
   const {
     createStage,
@@ -248,7 +226,7 @@ function StageContextMenu({ stage }: { stage: Stage }) {
 
   const handleReplanFromHere = () => {
     console.log("[WS] Replan from stage:", stage.id);
-    selectNode({ planId, type: "stage", id: stage.id, mode: "replace" });
+    if (plan) selectNode({ plan, type: "stage", id: stage.id, mode: "replace" });
   };
 
   const handleExecutionModeChange = (mode: "sequential" | "parallel") => {

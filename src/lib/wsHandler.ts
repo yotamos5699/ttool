@@ -1,32 +1,34 @@
-import { usePlanStore, type WSMessage } from "@/stores/planStore";
+import { usePlanDataStore, useWSStore, useUIStore, type WSMessage } from "@/stores/plan";
 
 /**
  * Centralized WebSocket message handler
  * Dispatches incoming messages to appropriate store actions
  */
 export function handleWsMessage(message: WSMessage) {
-  const store = usePlanStore.getState();
+  const planStore = usePlanDataStore.getState();
+  const wsStore = useWSStore.getState();
+  const uiStore = useUIStore.getState();
 
   switch (message.type) {
     // Room events
     case "joined":
       console.log("[WS] Joined room:", message);
       if (typeof message.roomSize === "number") {
-        store.setRoomSize(message.roomSize);
+        wsStore.setRoomSize(message.roomSize);
       }
       break;
 
     case "user:joined":
       console.log("[WS] User joined:", message);
       if (typeof message.roomSize === "number") {
-        store.setRoomSize(message.roomSize);
+        wsStore.setRoomSize(message.roomSize);
       }
       break;
 
     case "user:left":
       console.log("[WS] User left:", message);
       if (typeof message.roomSize === "number") {
-        store.setRoomSize(message.roomSize);
+        wsStore.setRoomSize(message.roomSize);
       }
       break;
 
@@ -67,20 +69,20 @@ export function handleWsMessage(message: WSMessage) {
     case "replan:committed":
       console.log("[WS] Replan committed:", message);
       // TODO: Apply replan changes, clear blast radius
-      store.clearBlastRadius();
+      uiStore.clearBlastRadius(planStore.plan?.id ?? 0);
       break;
 
     case "replan:aborted":
       console.log("[WS] Replan aborted:", message);
       // TODO: Revert any pending changes, clear blast radius
-      store.clearBlastRadius();
+      uiStore.clearBlastRadius(planStore.plan?.id ?? 0);
       break;
 
     // Error events
     case "error":
       console.error("[WS] Error:", message);
       if (typeof message.error === "string") {
-        store.setWsError(message.error);
+        wsStore.setWsError(message.error);
       }
       break;
 

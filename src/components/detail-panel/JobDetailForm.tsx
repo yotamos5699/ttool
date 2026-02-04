@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { usePlanStore, type Job, type Stage } from "@/stores/planStore";
+import { usePlanDataStore, type Job, type Stage } from "@/stores/plan";
 import { usePlanMutations } from "@/hooks/usePlanMutations";
 
 type JobDetailFormProps = {
@@ -24,7 +24,7 @@ export function JobDetailForm({ job, stageJobs, allStages }: JobDetailFormProps)
     job.dependsOnStages,
   );
 
-  const planId = usePlanStore((s) => s.plan?.id ?? 0);
+  const planId = usePlanDataStore((s) => s.plan?.id ?? 0);
   const { updateJob } = usePlanMutations(planId);
 
   // Get available jobs for dependencies (exclude self and children)

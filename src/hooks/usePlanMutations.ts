@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { usePlanStore, type Plan, type Stage, type Job, type ContextNode } from "@/stores/planStore";
+import { usePlanDataStore, type Plan, type Stage, type Job, type ContextNode } from "@/stores/plan";
 
 // Server actions - New node-based action files
 import { updatePlan as updatePlanAction } from "@/actions/plan-actions";
@@ -34,8 +34,8 @@ import type { ContextType } from "@/dbs/drizzle/schema";
  */
 export function usePlanMutations(planId: number) {
   const queryClient = useQueryClient();
-  const store = usePlanStore.getState();
-  const plan = usePlanStore((s) => s.plan);
+  const store = usePlanDataStore.getState();
+  const plan = usePlanDataStore((s) => s.plan);
 
   // Helper to invalidate plan query after mutation
   const invalidatePlan = () => {

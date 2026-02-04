@@ -7,19 +7,20 @@ import { ContextNodeList } from "./ContextNodeList";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import {
-  usePlanStore,
+  usePlanDataStore,
+  useUIStore,
   findStage,
   findJob,
   getAllStages,
   getAllJobsFromList,
-} from "@/stores/planStore";
+} from "@/stores/plan";
 
 export function DetailPanel() {
-  const plan = usePlanStore((s) => s.plan);
-  const selection = usePlanStore((s) => s.selection);
-  const selectedNodesByPlan = usePlanStore((s) => s.selectedNodesByPlan);
-  const blastRadiusByPlan = usePlanStore((s) => s.blastRadiusByPlan);
-  const clearSelections = usePlanStore((s) => s.clearSelections);
+  const plan = usePlanDataStore((s) => s.plan);
+  const selection = useUIStore((s) => s.selection);
+  const selectedNodesByPlan = useUIStore((s) => s.selectedNodesByPlan);
+  const blastRadiusByPlan = useUIStore((s) => s.blastRadiusByPlan);
+  const clearSelections = useUIStore((s) => s.clearSelections);
 
   if (!plan) {
     return (

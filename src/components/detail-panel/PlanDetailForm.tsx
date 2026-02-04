@@ -5,11 +5,11 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { usePlanStore } from "@/stores/planStore";
+import { usePlanDataStore } from "@/stores/plan";
 import { usePlanMutations } from "@/hooks/usePlanMutations";
 
 export function PlanDetailForm() {
-  const plan = usePlanStore((s) => s.plan);
+  const plan = usePlanDataStore((s) => s.plan);
   const [name, setName] = useState(plan?.name ?? "");
   const [goal, setGoal] = useState(plan?.goal ?? "");
 

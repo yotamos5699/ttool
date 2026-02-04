@@ -17,7 +17,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { usePlanStore, type ContextNode } from "@/stores/planStore";
+import { usePlanDataStore, type ContextNode } from "@/stores/plan";
 import { usePlanMutations } from "@/hooks/usePlanMutations";
 import type { ContextType } from "@/dbs/drizzle/schema";
 
@@ -42,7 +42,7 @@ function ContextNodeItem({ node }: { node: ContextNode }) {
   const [type, setType] = useState(node.type);
   const [payload, setPayload] = useState(node.payload);
 
-  const planId = usePlanStore((s) => s.plan?.id ?? 0);
+  const planId = usePlanDataStore((s) => s.plan?.id ?? 0);
   const { updateContext, deleteContext } = usePlanMutations(planId);
 
   const typeConfig = contextTypes.find((t) => t.value === node.type) || contextTypes[4];
@@ -172,7 +172,7 @@ export function ContextNodeList({
   targetId,
   targetType,
 }: ContextNodeListProps) {
-  const planId = usePlanStore((s) => s.plan?.id ?? 0);
+  const planId = usePlanDataStore((s) => s.plan?.id ?? 0);
   const { createContext } = usePlanMutations(planId);
 
   const handleAdd = () => {

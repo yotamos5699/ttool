@@ -4,7 +4,7 @@ import { useEffect } from "react";
 import { PlanTree } from "@/components/plan-tree/PlanTree";
 import { DetailPanel } from "@/components/detail-panel";
 import { useWebSocket } from "@/hooks/useWebSocket";
-import { usePlanStore, type Plan } from "@/stores/planStore";
+import { usePlanDataStore, type Plan } from "@/stores/plan";
 import { handleWsMessage } from "@/lib/wsHandler";
 
 type PlanClientProps = {
@@ -12,8 +12,8 @@ type PlanClientProps = {
 };
 
 export function PlanClient({ initialPlan }: PlanClientProps) {
-  const setPlan = usePlanStore((s) => s.setPlan);
-  const planId = usePlanStore((s) => s.plan?.id);
+  const setPlan = usePlanDataStore((s) => s.setPlan);
+  const planId = usePlanDataStore((s) => s.plan?.id);
 
   // Sync initial plan to store on mount
   useEffect(() => {

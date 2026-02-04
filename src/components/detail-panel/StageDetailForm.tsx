@@ -12,7 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { usePlanStore, type Stage } from "@/stores/planStore";
+import { usePlanDataStore, type Stage } from "@/stores/plan";
 import { usePlanMutations } from "@/hooks/usePlanMutations";
 
 type StageDetailFormProps = {
@@ -28,7 +28,7 @@ export function StageDetailForm({ stage, allStages }: StageDetailFormProps) {
     stage.dependsOnStages,
   );
 
-  const planId = usePlanStore((s) => s.plan?.id ?? 0);
+  const planId = usePlanDataStore((s) => s.plan?.id ?? 0);
   const { updateStage } = usePlanMutations(planId);
 
   // Get available stages for dependencies (exclude self and children)

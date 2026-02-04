@@ -22,7 +22,7 @@ export const ioNodes = pgTable(
   (t) => [
     index("io_nodes_direction_idx").on(t.direction),
     index("io_nodes_type_idx").on(t.ioType),
-  ]
+  ],
 );
 
 /* ----------------------------------

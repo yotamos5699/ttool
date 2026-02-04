@@ -14,16 +14,16 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { StageNode } from "./StageNode";
 import { cn } from "@/lib/utils";
-import { usePlanStore } from "@/stores/planStore";
+import { usePlanDataStore, useUIStore, useWSStore } from "@/stores/plan";
 import { SelectionStats } from "@/components/plan-tree/SelectionStats";
 
 export function PlanTree() {
-  const plan = usePlanStore((s) => s.plan);
-  const selection = usePlanStore((s) => s.selection);
-  const setSelection = usePlanStore((s) => s.setSelection);
-  const selectedNodesByPlan = usePlanStore((s) => s.selectedNodesByPlan);
-  const blastRadiusByPlan = usePlanStore((s) => s.blastRadiusByPlan);
-  const clearSelections = usePlanStore((s) => s.clearSelections);
+  const plan = usePlanDataStore((s) => s.plan);
+  const selection = useUIStore((s) => s.selection);
+  const setSelection = useUIStore((s) => s.setSelection);
+  const selectedNodesByPlan = useUIStore((s) => s.selectedNodesByPlan);
+  const blastRadiusByPlan = useUIStore((s) => s.blastRadiusByPlan);
+  const clearSelections = useUIStore((s) => s.clearSelections);
 
   if (!plan) {
     return (
@@ -52,7 +52,7 @@ export function PlanTree() {
             "px-4 py-2 border-b cursor-pointer hover:bg-muted/50 transition-colors",
             selection?.type === "plan" && "bg-primary/10 border-l-2 border-l-primary",
           )}
-          onClick={handleSelectPlan}
+          onPointerDown={handleSelectPlan}
         >
           <div className="font-medium truncate">{plan.name}</div>
           <div className="text-xs text-muted-foreground truncate">{plan.goal}</div>
@@ -137,11 +137,11 @@ function BlastRadiusBar({
 }
 
 export function ConnectionHeader() {
-  const plan = usePlanStore((s) => s.plan);
-  const allExpanded = usePlanStore((s) => s.allExpanded);
-  const toggleAllExpanded = usePlanStore((s) => s.toggleAllExpanded);
-  const wsState = usePlanStore((s) => s.wsState);
-  const roomSize = usePlanStore((s) => s.roomSize);
+  const plan = usePlanDataStore((s) => s.plan);
+  const allExpanded = useUIStore((s) => s.allExpanded);
+  const toggleAllExpanded = useUIStore((s) => s.toggleAllExpanded);
+  const wsState = useWSStore((s) => s.wsState);
+  const roomSize = useWSStore((s) => s.roomSize);
 
   const isConnected = wsState === "OPEN";
 

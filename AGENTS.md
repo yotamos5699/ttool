@@ -86,6 +86,30 @@ import type { Metadata } from "next";
 - **Trailing commas:** Yes, in objects and arrays
 - **Line length:** ~80-100 characters
 
+
+## Code Hygiene & Project Maturity Rules
+
+### File Size
+- Keep files small and focused
+- Hard limit: ~200 lines per file
+- If a file grows, extract logic instead of extending it
+
+### Readability
+- Prefer descriptive names over comments
+- Avoid code remarks unless they express non-obvious intent
+- Avoid unnecessary blank lines or visual padding
+- Let structure and naming explain the code
+
+### Early-Stage Discipline
+- Do not introduce versioning systems in the initial development stage
+- Do not mark code as "deprecated", "legacy", or "to be removed"
+- Do not add polyfills, migrations, or backward-compatibility layers
+- Avoid speculative abstractions and future-proofing
+
+### Technical Debt Policy
+- Do not introduce technical debt preemptively
+- Solve only real, present requirements
+- Assume no existing clients and no backward compatibility obligations
 ### Naming Conventions
 
 | Element | Convention | Example |

@@ -1,6 +1,6 @@
 "use client";
 
-import { usePlanStore, type WSMessage } from "@/stores/planStore";
+import { useWSStore, type WSMessage } from "@/stores/plan";
 import { catchError } from "@/lib/catchWrapper";
 import { useEffect, useRef } from "react";
 
@@ -31,9 +31,9 @@ export function useWebSocket({
   const shouldReconnect = useRef(autoReconnect);
 
   // Get store actions
-  const setWsState = usePlanStore((s) => s.setWsState);
-  const setWs = usePlanStore((s) => s.setWs);
-  const setWsError = usePlanStore((s) => s.setWsError);
+  const setWsState = useWSStore((s) => s.setWsState);
+  const setWs = useWSStore((s) => s.setWs);
+  const setWsError = useWSStore((s) => s.setWsError);
 
   useEffect(() => {
     currentPlanId.current = planId;
@@ -136,4 +136,4 @@ export function useWebSocket({
 }
 
 // Re-export types from store for backwards compatibility
-export type { WSMessage } from "@/stores/planStore";
+export type { WSMessage } from "@/stores/plan";
