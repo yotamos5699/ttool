@@ -1,5 +1,8 @@
 # UPDATES.md - Change Log
 
+Version: 0.2
+Updated: 2026-02-04
+
 ## [Unreleased] - Hierarchical Node System Remodel
 
 ### Overview
@@ -21,12 +24,13 @@ nodes (core hierarchy)
 ├── stage_nodes (stage-specific data)
 ├── job_nodes (job-specific data)
 ├── context_nodes (context-specific data)
-└── io_nodes (io-specific data with direction)
+├── data_nodes (data-specific payloads)
+└── plan_edges (explicit flow edges)
 ```
 
 #### ltree Path Format
 
-Paths use type-prefixed segments: `plan_1.stage_2.job_3.context_4`
+Paths use type-prefixed segments: `plan_1.stage_2.job_3.context_4.data_5.collector_6`
 
 Benefits:
 - O(1) subtree/ancestor queries via GiST index
@@ -48,21 +52,22 @@ Benefits:
 |-------|---------|
 | `tenants` | Multi-tenant isolation |
 | `nodes` | Unified hierarchy with ltree paths |
-| `plan_nodes` | Plan-specific attributes (goal, version) |
+| `plan_nodes` | Plan-specific attributes (goal, version, parentVersion) |
 | `stage_nodes` | Stage-specific attributes (executionMode, description) |
-| `job_nodes` | Job-specific attributes (description, dependencies) |
+| `job_nodes` | Job-specific attributes (description) |
 | `context_nodes` | Context-specific attributes (contextType, payload) |
-| `io_nodes` | IO-specific attributes (direction, ioType, data) |
+| `data_nodes` | Data-specific payloads (jsonb) |
+| `plan_edges` | Explicit control/data flow edges |
 
 #### New Enums
 
 | Enum | Values |
 |------|--------|
-| `node_type` | plan, stage, job, context, io |
+| `node_type` | plan, stage, job, context, data, collector |
 | `execution_mode` | sequential, parallel |
 | `context_type` | requirement, constraint, decision, code, note |
-| `io_direction` | input, output |
-| `io_type` | data, generator, artifact, model, dataset, url |
+| `plan_edge_kind` | control, data |
+| `plan_edge_role` | required, optional |
 
 #### Indexes
 
@@ -95,7 +100,7 @@ src/dbs/drizzle/schema/
     ├── stage-nodes.ts         # Stage-specific data
     ├── job-nodes.ts           # Job-specific data
     ├── context-nodes.ts       # Context-specific data
-    └── io-nodes.ts            # IO-specific data
+    └── data-nodes.ts          # Data-specific payloads
 
 src/lib/
 ├── ltree.ts                    # ltree path utilities
@@ -147,7 +152,7 @@ ORDER BY depth;
 
 #### Resolve Dependencies for Job
 ```typescript
-// Inherits context/io from all ancestors
+// Inherits dependencies from all ancestors
 // Respects excludeDependencyIds and includeDependencyIds
 const deps = await resolveInheritedDependencies(jobNodeId);
 ```

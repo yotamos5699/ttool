@@ -1,8 +1,11 @@
 # ttool - Deterministic Plan & Context Management System
 
+Version: 0.2
+Updated: 2026-02-04
+
 ## Overview
 
-A Next.js application for managing hierarchical execution plans with context inheritance, real-time collaboration, and replanning capabilities.
+A Next.js application for managing hierarchical planning trees with context inheritance, real-time collaboration, and replanning capabilities.
 
 ## Tech Stack
 
@@ -43,11 +46,13 @@ A Next.js application for managing hierarchical execution plans with context inh
 | Table | Description |
 |-------|-------------|
 | `plans` | Versioned plans with parent-version for forking |
-| `stages` | Self-nesting, execution mode (sequential/parallel), dependsOn array |
-| `jobs` | Self-nesting, belongs to stage, dependsOn array |
-| `contextNodes` | Attachable at plan/stage/job level (requirement, constraint, decision, code, note) |
-| `ioNodes` | Data nodes (data, generator, artifact, model, dataset, url) |
-| `ioEnvelopes` | Execution barrier with input/output + context snapshot |
+| `nodes` | Unified hierarchy (plan, stage, job, context, data, collector) with ltree paths |
+| `plan_nodes` | Plan-specific attributes (goal, version, parentVersion) |
+| `stage_nodes` | Stage-specific attributes (executionMode, description) |
+| `job_nodes` | Job-specific attributes (description) |
+| `context_nodes` | Context-specific attributes (contextType, payload) |
+| `data_nodes` | Data-specific payloads (jsonb) |
+| `plan_edges` | Explicit control/data flow edges between nodes |
 
 ### Execution & Replan
 
@@ -63,12 +68,11 @@ A Next.js application for managing hierarchical execution plans with context inh
 ### 1. Hierarchical Plan Tree
 - Stages can nest other stages
 - Jobs can nest other jobs
-- Dependencies within same level (dependsOn arrays)
+- Dependencies stored on nodes via include/exclude/disable inheritance
 
 ### 2. Context Inheritance
 - Global → Project → Stage → Job
-- IO Envelopes control which context is included/excluded
-- Context snapshot at execution time
+- Dependencies inherit from ancestors via ltree traversal
 
 ### 3. Real-time Collaboration
 - WebSocket for live updates
@@ -91,19 +95,18 @@ src/
 │           ├── page.tsx          # Server component
 │           └── PlanClient.tsx    # Client with reducer state
 ├── actions/                      # Server actions
-│   ├── plans.ts                  # getPlanTree, forkPlan
-│   ├── stages.ts                 # CRUD, move, duplicate
-│   ├── jobs.ts                   # CRUD, move, duplicate
-│   ├── context.ts                # getInheritedContext
-│   ├── io-nodes.ts
-│   ├── io-envelopes.ts
-│   ├── replan.ts                 # computeBlastRadius
-│   └── execution.ts
+│   ├── plan-actions.ts           # getPlanTree, forkPlan
+│   ├── stage-actions.ts          # CRUD, move, duplicate
+│   ├── job-actions.ts            # CRUD, move, duplicate
+│   ├── context-actions.ts        # getInheritedContext
+│   ├── data-actions.ts           # data node CRUD
+│   ├── replan-actions.ts         # computeBlastRadius
+│   └── execution-actions.ts
 ├── components/
 │   ├── plan-tree/                # Tree view (PlanTree, StageNode, JobNode)
 │   ├── detail-panel/             # Forms (PlanDetailForm, StageDetailForm, JobDetailForm)
 │   ├── replan/                   # BlastRadiusIndicator, ReplanPanel
-│   ├── io-envelope/              # IOEnvelopeModal, ContextSelector
+│   ├── data-node/                # data node UI (if added)
 │   └── ui/                       # shadcn primitives
 ├── hooks/
 │   └── useWebSocket.ts           # Real-time connection
@@ -152,5 +155,3 @@ WebSocket messages trigger dispatches for real-time sync across clients.
 4. **History/Audit** - Track all changes with timestamps
 5. **Permissions** - Role-based access control
 6. **Export/Import** - Plan templates and sharing
-
-

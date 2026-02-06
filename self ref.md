@@ -133,7 +133,7 @@ DO NOT:
 - embed dependency graphs inside node config
 - materialize effective dependencies
 - hardcode node types in TypeScript
-- introduce dependsOnStages or dependsOn* fields
+- introduce dependency lists on stages or jobs
 
 
 ====================
@@ -148,29 +148,68 @@ Produce:
 - production-grade planning logic only
 
 Esthetics:
-- create tecnical depth "departed" marking and version,
 - do not migrate, use db push with updated schema, and reseed, existing data is not importent
+{/*lets replace plan "stages" with "parts" and inside we will add a type to each node 
+    childStages/childJobs/jobs exc.. colomms with 
+    
+        disableDependencyInheritance: boolean().default(false).notNull(),
+        includeDependencyIds: integer().array().default([]),
+        excludeDependencyIds: integer().array().default([]),
+    at each node level
+    ,
+    also we need to add edges for later impl data flow between nodes
+    table exists but no data seeded into it yet
+  seems also like we dont need stageId in nodes table anymore, we are using path for indexing and hierarchy
+  so now im expecting plan structure to be like this:
+{
+  "id": 1,
+    "name": "AI Code Review Pipeline",
+    "goal": "Automated code review with context-aware analysis, security scanning, and improvement suggestions",
+    "version": 1,
+    "parentVersion": null,
+    "parts": [
+        {
+            "id": 21,
+              "type": "stage", 
+            "planId": 1,
+            "parentStageId": null,
+            "title": "AI-Powered Analysis",
+            "description": "Use LLMs for deep code understanding",
+            "executionMode": "sequential",}
+            "childNodes": [... other nodes like jobs, stages etc with type field to distinguish
+            ...all other stage fields , 
+   
+   
+            now lets do db push and seed with this new structure
+            make a minimum viable plan with 2 stages and few jobs inside, with cascading stages/jobs 
+            and context nodes at different levels
+            also add dependency fields at some node level(includeDependencyIds)
 
+            also remove dependency using  excludeDependencyIds on some nodes
+            and disableDependencyInheritance on some nodes
+            also add edges between nodes to represent data flow
+            and represent the existing relation in node existing DetailPanel view
+            */}
+  
 <!-- /*
 Goal:
 Remodel the app around a hierarchical node system based on a single generic ToolNode model.
 
 High-level design:
-- Use a single `nodes` table to represent stages, jobs, context, and IO
+- Use a single `nodes` table to represent stages, jobs, context, and data
 - Hierarchy is represented via a path-based structure (use PostgreSQL ltree)
-- Context and IO are modeled as nodes (no ioEnvelopes)
-- IO is split into explicit input/output nodes
+- Context and data are modeled as nodes
 
 Node types:
 - stage
 - job
 - context
-- io
+- data
 then we can use a subnode structure for specific node types if needed, e.g.:
 - stageNodes
 - jobNodes
 - contextNodes
-- ioNodes
+- dataNodes
 Key behavior:
 - Dependency inheritance is enabled by default
 - A node can opt out of inheritance using `disableDependencyInheritance`

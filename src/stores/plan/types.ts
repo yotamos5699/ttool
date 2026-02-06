@@ -10,38 +10,18 @@ export type ContextNode = {
   payload: string;
 };
 
-export type Job = {
+export type PlanNodeType = "stage" | "job" | "context" | "data" | "plan";
+
+export type PlanNode = {
   id: number;
-  stageId: number;
-  parentJobId: number | null;
+  type: PlanNodeType;
   title: string;
   description: string | null;
-  dependsOn: number[];
-  dependsOnStages: number[];
-  dependsOnJobs: number[];
-  childJobs?: Job[];
+  executionMode?: "sequential" | "parallel";
   contextNodes?: ContextNode[];
-};
-
-export type IOEnvelope = {
-  id: number;
-  inputNode: { id: number; type: string; data: string };
-  outputNode: { id: number; type: string; data: string };
-};
-
-export type Stage = {
-  id: number;
-  planId: number;
-  parentStageId: number | null;
-  title: string;
-  description: string | null;
-  executionMode: "sequential" | "parallel";
-  dependsOn: number[];
-  dependsOnStages: number[];
-  childStages?: Stage[];
-  jobs?: Job[];
-  contextNodes?: ContextNode[];
-  ioEnvelopes?: IOEnvelope[];
+  dataNodeIds: number[];
+  dependencies: NodeDependencies;
+  childNodes?: PlanNode[];
 };
 
 export type Plan = {
@@ -50,8 +30,12 @@ export type Plan = {
   goal: string;
   version: number;
   parentVersion: number | null;
-  stages: Stage[];
+  parts: PlanNode[];
   contextNodes: ContextNode[];
+  dependencies: NodeDependencies;
+  dataNodeIds: number[];
+  edges: PlanEdge[];
+  nodesByType: Record<string, number[]>;
 };
 
 /* ----------------------------------
@@ -65,6 +49,20 @@ export type Selection = {
 
 export type NodeType = "stage" | "job";
 export type NodeKey = `${NodeType}:${number}`;
+
+export type NodeDependencies = {
+  includeDependencyIds: number[];
+  excludeDependencyIds: number[];
+  disableDependencyInheritance: boolean;
+};
+
+export type PlanEdge = {
+  id: number;
+  fromNodeId: number;
+  toNodeId: number;
+  kind: "control" | "data";
+  role?: "required" | "optional";
+};
 
 /* ----------------------------------
  * WebSocket Types

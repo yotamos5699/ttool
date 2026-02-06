@@ -22,7 +22,7 @@
 
 // export type IOEnvelope = {
 //     schemaVersion: 1;
-//     stageId: number;
+//     parentId: number;
 //     jobId?: number;
 
 //     inputNode:IoNodeData;
@@ -36,7 +36,7 @@
 //   title: string;
 //   description?: string;
 //   executionMode: ExecutionMode;
-//   dependsOn: number[];
+//   dependencies: number[];
 //   ioEnvelope: number;
 
 //   contextNodes: number[];
@@ -47,17 +47,17 @@
 
 // type job  = {
 //     id: number;
-//     stageId: number;
+//     parentId: number;
 //     title: string;
 //     description?: string;
-//     dependsOn: number[];
+//     dependencies: number[];
 //     ioEnvelope: number;
 // }
 // export type Plan = {
 //   id: number;
 //   name: string;
 //   goal: string;
-//   stages: Stage[];
+//   parts: PlanNode[];
 //   version: number;
 //   parentVersion?: number;
 //   createdAt: number;

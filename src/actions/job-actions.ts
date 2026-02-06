@@ -19,18 +19,23 @@ export interface JobCreateInput {
   name: string;
   description?: string;
   planId: number;
-  stageId: number; // Parent stage node ID
   parentId: number; // Parent node (stage or job for nesting)
   tenantId: number;
-  dependsOnNodeIds?: number[];
+  disableDependencyInheritance?: boolean;
+  includeDependencyIds?: number[];
+  excludeDependencyIds?: number[];
+  config?: Record<string, unknown> | null;
 }
 
 export interface JobUpdateInput {
   name?: string;
   description?: string;
-  dependsOnNodeIds?: number[];
   active?: boolean;
   isFrozen?: boolean;
+  disableDependencyInheritance?: boolean;
+  includeDependencyIds?: number[];
+  excludeDependencyIds?: number[];
+  config?: Record<string, unknown> | null;
 }
 
 export interface JobWithDetails extends Node {
@@ -58,8 +63,11 @@ export async function createJob(data: JobCreateInput): Promise<JobWithDetails> {
       depth: 0,
       parentId: data.parentId,
       planId: data.planId,
-      stageId: data.stageId,
       tenantId: data.tenantId,
+      disableDependencyInheritance: data.disableDependencyInheritance ?? false,
+      includeDependencyIds: data.includeDependencyIds ?? [],
+      excludeDependencyIds: data.excludeDependencyIds ?? [],
+      config: data.config ?? null,
     })
     .returning();
 
@@ -79,7 +87,6 @@ export async function createJob(data: JobCreateInput): Promise<JobWithDetails> {
     .values({
       nodeId: node.id,
       description: data.description ?? null,
-      dependsOnNodeIds: data.dependsOnNodeIds ?? [],
     })
     .returning();
 
@@ -103,44 +110,6 @@ export async function getJob(id: number): Promise<JobWithDetails | null> {
   });
 
   return { ...node, jobData: jobData ?? null };
-}
-
-/* ----------------------------------
- * Get Jobs for Stage
- * ---------------------------------- */
-
-export async function getJobsForStage(
-  stageId: number,
-  options?: { activeOnly?: boolean }
-): Promise<JobWithDetails[]> {
-  const conditions = [eq(nodes.stageId, stageId), eq(nodes.type, "job")];
-
-  if (options?.activeOnly) {
-    conditions.push(eq(nodes.active, true));
-  }
-
-  const jobNodesList = await db.query.nodes.findMany({
-    where: and(...conditions),
-    orderBy: (n, { asc }) => [asc(n.path)],
-  });
-
-  if (jobNodesList.length === 0) return [];
-
-  // Batch fetch job data
-  const jobIds = jobNodesList.map((n) => n.id);
-  const jobDataList = await db.query.jobNodes.findMany({
-    where: inArray(jobNodes.nodeId, jobIds),
-  });
-
-  const jobDataMap = new Map<number, JobNode>();
-  for (const jd of jobDataList) {
-    jobDataMap.set(jd.nodeId, jd);
-  }
-
-  return jobNodesList.map((n) => ({
-    ...n,
-    jobData: jobDataMap.get(n.id) ?? null,
-  }));
 }
 
 /* ----------------------------------
@@ -196,6 +165,16 @@ export async function updateJob(
   if (data.name !== undefined) nodeUpdates.name = data.name;
   if (data.active !== undefined) nodeUpdates.active = data.active;
   if (data.isFrozen !== undefined) nodeUpdates.isFrozen = data.isFrozen;
+  if (data.disableDependencyInheritance !== undefined) {
+    nodeUpdates.disableDependencyInheritance = data.disableDependencyInheritance;
+  }
+  if (data.includeDependencyIds !== undefined) {
+    nodeUpdates.includeDependencyIds = data.includeDependencyIds;
+  }
+  if (data.excludeDependencyIds !== undefined) {
+    nodeUpdates.excludeDependencyIds = data.excludeDependencyIds;
+  }
+  if (data.config !== undefined) nodeUpdates.config = data.config;
 
   const [updatedNode] = await db
     .update(nodes)
@@ -206,7 +185,6 @@ export async function updateJob(
   // Update job-specific data
   const jobUpdates: Partial<JobNode> = {};
   if (data.description !== undefined) jobUpdates.description = data.description;
-  if (data.dependsOnNodeIds !== undefined) jobUpdates.dependsOnNodeIds = data.dependsOnNodeIds;
 
   let jobData = existing.jobData;
   if (Object.keys(jobUpdates).length > 0) {

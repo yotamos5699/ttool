@@ -5,12 +5,10 @@ import { db } from "@/dbs/drizzle";
 import {
   replanSessions,
   nodes,
-  stageNodes,
-  jobNodes,
   type ReplanSession,
   type ReplanSessionInsert,
 } from "@/dbs/drizzle/schema";
-import { getSubtree, getAncestors } from "./query-actions";
+import { getSubtree } from "./query-actions";
 
 /* ----------------------------------
  * Types
@@ -30,7 +28,7 @@ export interface BlastRadius {
  * Create a new replan session
  */
 export async function createReplanSession(
-  data: Omit<ReplanSessionInsert, "id" | "createdAt" | "updatedAt">
+  data: Omit<ReplanSessionInsert, "id" | "createdAt" | "updatedAt">,
 ): Promise<ReplanSession> {
   const [session] = await db.insert(replanSessions).values(data).returning();
   return session;
@@ -51,7 +49,7 @@ export async function getReplanSession(id: number): Promise<ReplanSession | null
  * Get all replan sessions for a plan
  */
 export async function getReplanSessionsForPlan(
-  planNodeId: number
+  planNodeId: number,
 ): Promise<ReplanSession[]> {
   return db
     .select()
@@ -64,16 +62,13 @@ export async function getReplanSessionsForPlan(
  * Get active replan sessions for a plan (draft or in_progress)
  */
 export async function getActiveReplanSessions(
-  planNodeId: number
+  planNodeId: number,
 ): Promise<ReplanSession[]> {
   return db
     .select()
     .from(replanSessions)
     .where(
-      and(
-        eq(replanSessions.planNodeId, planNodeId),
-        eq(replanSessions.status, "draft")
-      )
+      and(eq(replanSessions.planNodeId, planNodeId), eq(replanSessions.status, "draft")),
     )
     .orderBy(desc(replanSessions.createdAt));
 }
@@ -83,7 +78,7 @@ export async function getActiveReplanSessions(
  */
 export async function updateReplanSession(
   id: number,
-  data: Partial<Omit<ReplanSessionInsert, "id" | "createdAt">>
+  data: Partial<Omit<ReplanSessionInsert, "id" | "createdAt">>,
 ): Promise<ReplanSession> {
   const [session] = await db
     .update(replanSessions)
@@ -101,7 +96,7 @@ export async function updateReplanSession(
  */
 export async function updateReplanSessionStatus(
   id: number,
-  status: ReplanSession["status"]
+  status: ReplanSession["status"],
 ): Promise<ReplanSession> {
   return updateReplanSession(id, { status });
 }
@@ -145,7 +140,7 @@ export async function deleteReplanSession(id: number): Promise<void> {
 export async function calculateBlastRadius(
   planNodeId: number,
   nodeIds: number[],
-  tenantId: number
+  tenantId: number,
 ): Promise<BlastRadius> {
   // Get the plan node first
   const planNode = await db.query.nodes.findFirst({
@@ -159,47 +154,20 @@ export async function calculateBlastRadius(
   // Get all nodes in the plan
   const allNodes = await getSubtree(planNode.path, tenantId);
 
-  // Get all stage and job nodes for dependency analysis
-  const stageNodesData = await db
-    .select()
-    .from(stageNodes)
-    .where(
-      eq(
-        stageNodes.nodeId,
-        db.select({ id: nodes.id }).from(nodes).where(eq(nodes.planId, planNodeId))
-      )
-    );
+  const planNodes = await db.query.nodes.findMany({
+    where: eq(nodes.planId, planNodeId),
+  });
 
-  const jobNodesData = await db
-    .select()
-    .from(jobNodes)
-    .where(
-      eq(
-        jobNodes.nodeId,
-        db.select({ id: nodes.id }).from(nodes).where(eq(nodes.planId, planNodeId))
-      )
-    );
+  const dependencyMap = new Map<number, number[]>();
+  const dependedByMap = new Map<number, number[]>();
 
-  // Build dependency maps
-  const dependsOnMap = new Map<number, number[]>(); // nodeId -> nodes it depends on
-  const dependedByMap = new Map<number, number[]>(); // nodeId -> nodes that depend on it
-
-  for (const stage of stageNodesData) {
-    if (stage.dependsOnNodeIds && stage.dependsOnNodeIds.length > 0) {
-      dependsOnMap.set(stage.nodeId, stage.dependsOnNodeIds);
-      for (const depId of stage.dependsOnNodeIds) {
+  for (const node of planNodes) {
+    const includeIds = node.includeDependencyIds ?? [];
+    if (includeIds.length > 0) {
+      dependencyMap.set(node.id, includeIds);
+      for (const depId of includeIds) {
         const existing = dependedByMap.get(depId) || [];
-        dependedByMap.set(depId, [...existing, stage.nodeId]);
-      }
-    }
-  }
-
-  for (const job of jobNodesData) {
-    if (job.dependsOnNodeIds && job.dependsOnNodeIds.length > 0) {
-      dependsOnMap.set(job.nodeId, job.dependsOnNodeIds);
-      for (const depId of job.dependsOnNodeIds) {
-        const existing = dependedByMap.get(depId) || [];
-        dependedByMap.set(depId, [...existing, job.nodeId]);
+        dependedByMap.set(depId, [...existing, node.id]);
       }
     }
   }
@@ -209,7 +177,7 @@ export async function calculateBlastRadius(
   const downstreamQueue = [...nodeIds];
   while (downstreamQueue.length > 0) {
     const current = downstreamQueue.shift()!;
-    const deps = dependsOnMap.get(current) || [];
+    const deps = dependencyMap.get(current) || [];
     for (const dep of deps) {
       if (!downstream.has(dep) && !nodeIds.includes(dep)) {
         downstream.add(dep);
@@ -264,7 +232,7 @@ export async function initiateReplan(params: {
   const blastRadius = await calculateBlastRadius(
     params.planNodeId,
     params.scopeNodeIds,
-    params.tenantId
+    params.tenantId,
   );
 
   // Get original snapshot of affected nodes
@@ -274,7 +242,7 @@ export async function initiateReplan(params: {
     .where(eq(nodes.planId, params.planNodeId));
 
   const affectedOriginals = originalNodes.filter((n) =>
-    blastRadius.affected.includes(n.id)
+    blastRadius.affected.includes(n.id),
   );
 
   return createReplanSession({
@@ -293,8 +261,8 @@ export async function initiateReplan(params: {
  * Get affected nodes for a replan session
  */
 export async function getAffectedNodes(
-  sessionId: number
-): Promise<typeof nodes.$inferSelect[]> {
+  sessionId: number,
+): Promise<(typeof nodes.$inferSelect)[]> {
   const session = await getReplanSession(sessionId);
   if (!session) return [];
 
@@ -307,8 +275,5 @@ export async function getAffectedNodes(
 
   if (allAffectedIds.length === 0) return [];
 
-  return db
-    .select()
-    .from(nodes)
-    .where(eq(nodes.planId, session.planNodeId));
+  return db.select().from(nodes).where(eq(nodes.planId, session.planNodeId));
 }

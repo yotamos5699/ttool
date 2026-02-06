@@ -1,5 +1,4 @@
 export { DetailPanel } from "./DetailPanel";
 export { PlanDetailForm } from "./PlanDetailForm";
-export { StageDetailForm } from "./StageDetailForm";
-export { JobDetailForm } from "./JobDetailForm";
+export { NodeDetailForm } from "./NodeDetailForm";
 export { ContextNodeList } from "./ContextNodeList";

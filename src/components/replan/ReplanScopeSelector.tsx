@@ -10,27 +10,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import type { PlanNode } from "@/stores/plan";
 
 /* ----------------------------------
  * Types
  * ---------------------------------- */
 
-type Stage = {
-  id: number;
-  title: string;
-  childStages?: Stage[];
-};
-
-type Job = {
-  id: number;
-  title: string;
-  stageId: number;
-  childJobs?: Job[];
-};
-
 type ReplanScopeSelectorProps = {
-  stages: Stage[];
-  jobs: Job[];
+  parts: PlanNode[];
   onComputeBlastRadius: (type: "stage" | "job", ids: number[]) => Promise<void>;
   onClear: () => void;
   isActive: boolean;
@@ -40,23 +27,12 @@ type ReplanScopeSelectorProps = {
  * Helpers
  * ---------------------------------- */
 
-function flattenStages(stages: Stage[]): Stage[] {
-  const result: Stage[] = [];
-  for (const stage of stages) {
-    result.push(stage);
-    if (stage.childStages) {
-      result.push(...flattenStages(stage.childStages));
-    }
-  }
-  return result;
-}
-
-function flattenJobs(jobs: Job[]): Job[] {
-  const result: Job[] = [];
-  for (const job of jobs) {
-    result.push(job);
-    if (job.childJobs) {
-      result.push(...flattenJobs(job.childJobs));
+function flattenNodes(nodes: PlanNode[]): PlanNode[] {
+  const result: PlanNode[] = [];
+  for (const node of nodes) {
+    result.push(node);
+    if (node.childNodes) {
+      result.push(...flattenNodes(node.childNodes));
     }
   }
   return result;
@@ -67,8 +43,7 @@ function flattenJobs(jobs: Job[]): Job[] {
  * ---------------------------------- */
 
 export function ReplanScopeSelector({
-  stages,
-  jobs,
+  parts,
   onComputeBlastRadius,
   onClear,
   isActive,
@@ -77,8 +52,9 @@ export function ReplanScopeSelector({
   const [scopeType, setScopeType] = useState<"stage" | "job">("stage");
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
 
-  const allStages = flattenStages(stages);
-  const allJobs = flattenJobs(jobs);
+  const allNodes = flattenNodes(parts);
+  const allStages = allNodes.filter((node) => node.type === "stage");
+  const allJobs = allNodes.filter((node) => node.type === "job");
 
   const handleScopeTypeChange = (value: "stage" | "job") => {
     setScopeType(value);

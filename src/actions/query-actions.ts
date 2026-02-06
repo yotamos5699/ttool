@@ -1,11 +1,20 @@
 "use server";
 
 import { db } from "@/dbs/drizzle";
-import { nodes, planNodes, type Node, type NodeType } from "@/dbs/drizzle/schema";
-import { eq, and, like, sql } from "drizzle-orm";
-import { getAncestorPaths, isDescendantOf } from "@/lib/ltree";
+import {
+  nodes,
+  planNodes,
+  stageNodes,
+  jobNodes,
+  contextNodes,
+  dataNodes,
+  planEdges,
+  type Node,
+  type NodeType,
+} from "@/dbs/drizzle/schema";
+import { eq, and, like, sql, inArray, or } from "drizzle-orm";
 import { nodesToPlan } from "@/lib/node-utils";
-import type { Plan } from "@/stores/planStore";
+import type { Plan } from "@/stores/plan";
 
 /* ----------------------------------
  * Get Subtree
@@ -15,30 +24,25 @@ import type { Plan } from "@/stores/planStore";
 export async function getSubtree(
   path: string,
   tenantId: number,
-  options?: { activeOnly?: boolean; types?: NodeType[] }
+  options?: { activeOnly?: boolean; types?: NodeType[] },
 ): Promise<Node[]> {
-  // Use LIKE for ltree descendant matching: path starts with prefix.
-  const pathPrefix = `${path}.%`;
-
-  const allNodes = await db.query.nodes.findMany({
-    where: eq(nodes.tenantId, tenantId),
-    orderBy: (n, { asc }) => [asc(n.depth), asc(n.path)],
-  });
-
-  // Filter to descendants
-  let result = allNodes.filter(
-    (n) => n.path === path || n.path.startsWith(path + ".")
-  );
+  const conditions = [
+    eq(nodes.tenantId, tenantId),
+    sql`${nodes.path}::ltree <@ ${path}::ltree`,
+  ];
 
   if (options?.activeOnly) {
-    result = result.filter((n) => n.active);
+    conditions.push(eq(nodes.active, true));
   }
 
   if (options?.types && options.types.length > 0) {
-    const typeSet = new Set(options.types);
-    result = result.filter((n) => typeSet.has(n.type));
+    conditions.push(inArray(nodes.type, options.types));
   }
 
+  const result = await db.query.nodes.findMany({
+    where: and(...conditions),
+    orderBy: (n, { asc }) => [asc(n.depth), asc(n.path)],
+  });
   return result;
 }
 
@@ -47,21 +51,15 @@ export async function getSubtree(
  * Returns all ancestor nodes of a given path
  * ---------------------------------- */
 
-export async function getAncestors(
-  path: string,
-  tenantId: number
-): Promise<Node[]> {
-  const ancestorPaths = getAncestorPaths(path);
-  if (ancestorPaths.length === 0) return [];
-
-  const allNodes = await db.query.nodes.findMany({
-    where: eq(nodes.tenantId, tenantId),
+export async function getAncestors(path: string, tenantId: number): Promise<Node[]> {
+  return db.query.nodes.findMany({
+    where: and(
+      eq(nodes.tenantId, tenantId),
+      sql`${nodes.path}::ltree @> ${path}::ltree`,
+      sql`${nodes.path} <> ${path}`,
+    ),
     orderBy: (n, { asc }) => [asc(n.depth)],
   });
-
-  // Filter to ancestors
-  const pathSet = new Set(ancestorPaths);
-  return allNodes.filter((n) => pathSet.has(n.path));
 }
 
 /* ----------------------------------
@@ -71,7 +69,7 @@ export async function getAncestors(
 
 export async function getDirectChildren(
   parentId: number,
-  options?: { activeOnly?: boolean; types?: NodeType[] }
+  options?: { activeOnly?: boolean; types?: NodeType[] },
 ): Promise<Node[]> {
   const conditions = [eq(nodes.parentId, parentId)];
 
@@ -99,7 +97,7 @@ export async function getDirectChildren(
 
 export async function getSiblings(
   nodeId: number,
-  options?: { includeSelf?: boolean; activeOnly?: boolean }
+  options?: { includeSelf?: boolean; activeOnly?: boolean },
 ): Promise<Node[]> {
   const node = await db.query.nodes.findFirst({
     where: eq(nodes.id, nodeId),
@@ -133,7 +131,7 @@ export async function getSiblings(
 export async function getNodesByTypeInPlan(
   planId: number,
   type: NodeType,
-  options?: { activeOnly?: boolean }
+  options?: { activeOnly?: boolean },
 ): Promise<Node[]> {
   const conditions = [eq(nodes.planId, planId), eq(nodes.type, type)];
 
@@ -148,18 +146,18 @@ export async function getNodesByTypeInPlan(
 }
 
 /* ----------------------------------
- * Get Context and IO Nodes in Subtree
+ * Get Context and Data Nodes in Subtree
  * Useful for dependency resolution
  * ---------------------------------- */
 
-export async function getContextAndIOInSubtree(
+export async function getContextAndDataInSubtree(
   path: string,
   tenantId: number,
-  options?: { activeOnly?: boolean }
+  options?: { activeOnly?: boolean },
 ): Promise<Node[]> {
   return getSubtree(path, tenantId, {
     ...options,
-    types: ["context", "io"],
+    types: ["context", "data"],
   });
 }
 
@@ -174,14 +172,20 @@ export async function getPlanTree(planId: number): Promise<{
 }> {
   const plan = await db.query.nodes.findFirst({
     where: and(eq(nodes.id, planId), eq(nodes.type, "plan")),
-  });
+  with:{plan:true,jobNode:true,stageNode:true}});
 
+  
   if (!plan) {
     return { plan: undefined, nodes: [] };
   }
 
-  const allNodes = await getSubtree(plan.path, plan.tenantId, {
-    activeOnly: true,
+  const allNodes = await db.query.nodes.findMany({
+    where: and(
+      eq(nodes.planId, planId),
+      eq(nodes.active, true),
+      sql`${nodes.path}::ltree <@ ${plan.path}::ltree`,
+    ),
+    orderBy: (n, { asc }) => [asc(n.depth), asc(n.path)],
   });
 
   return { plan, nodes: allNodes };
@@ -204,7 +208,44 @@ export async function getPlanForStore(planId: number): Promise<Plan | null> {
     where: eq(planNodes.nodeId, planId),
   });
 
-  return nodesToPlan(plan, allNodes, planData ?? undefined);
+  const nodeIds = allNodes.map((node) => node.id);
+
+  const nodeIdList = nodeIds.length > 0 ? nodeIds : [-1];
+
+  const stageDataList = await db.query.stageNodes.findMany({
+    where: inArray(stageNodes.nodeId, nodeIdList),
+  });
+  const jobDataList = await db.query.jobNodes.findMany({
+    where: inArray(jobNodes.nodeId, nodeIdList),
+  });
+  const contextDataList = await db.query.contextNodes.findMany({
+    where: inArray(contextNodes.nodeId, nodeIdList),
+  });
+  const dataDataList = await db.query.dataNodes.findMany({
+    where: inArray(dataNodes.nodeId, nodeIdList),
+  });
+  const planEdgeList = await db.query.planEdges.findMany({
+    where: or(
+      inArray(planEdges.fromNodeId, nodeIdList),
+      inArray(planEdges.toNodeId, nodeIdList),
+    ),
+  });
+
+  const stageDataByNodeId = new Map(stageDataList.map((row) => [row.nodeId, row]));
+  const jobDataByNodeId = new Map(jobDataList.map((row) => [row.nodeId, row]));
+  const contextDataByNodeId = new Map(contextDataList.map((row) => [row.nodeId, row]));
+  const dataDataByNodeId = new Map(dataDataList.map((row) => [row.nodeId, row]));
+
+  return nodesToPlan({
+    planNode: plan,
+    nodes: allNodes,
+    planData: planData ?? undefined,
+    contextDataByNodeId,
+    stageDataByNodeId,
+    jobDataByNodeId,
+    dataDataByNodeId,
+    planEdges: planEdgeList,
+  });
 }
 
 /* ----------------------------------
@@ -213,7 +254,7 @@ export async function getPlanForStore(planId: number): Promise<Plan | null> {
 
 export async function findNodesByPathPattern(
   pattern: string,
-  tenantId: number
+  tenantId: number,
 ): Promise<Node[]> {
   return db.query.nodes.findMany({
     where: and(eq(nodes.tenantId, tenantId), like(nodes.path, pattern)),

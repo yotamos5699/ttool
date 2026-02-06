@@ -3,9 +3,8 @@
 import { db } from "@/dbs/drizzle";
 import { nodes, type Node } from "@/dbs/drizzle/schema";
 import { eq, inArray } from "drizzle-orm";
-import { getAncestors, getSubtree, getContextAndIOInSubtree } from "./query-actions";
+import { getAncestors } from "./query-actions";
 import { getAncestorPaths } from "@/lib/ltree";
-import { deduplicateNodes } from "@/lib/node-utils";
 
 /* ----------------------------------
  * Types
@@ -31,9 +30,9 @@ export interface ResolvedDependencies {
  * 1. If disableDependencyInheritance is true:
  *    - Only return explicit includes
  * 2. Otherwise:
- *    - Get all context/io nodes from ancestor subtrees
- *    - Apply excludeDependencyIds filter
- *    - Add includeDependencyIds
+ *    - Inherit includeDependencyIds from ancestors
+ *    - Apply excludeDependencyIds to inherited only
+ *    - Add includeDependencyIds from the node
  * ---------------------------------- */
 
 export async function resolveDependencies(
@@ -58,14 +57,11 @@ export async function resolveDependencies(
         })
       : [];
 
-    // Filter out excluded from includes
-    const filtered = included.filter((n) => !excludeSet.has(n.id));
-
     return {
-      dependencies: filtered,
+      dependencies: included,
       inherited: [],
-      included: filtered,
-      excludedIds: [...excludeSet],
+      included,
+      excludedIds: [],
       inheritanceDisabled: true,
     };
   }
@@ -73,70 +69,40 @@ export async function resolveDependencies(
   // Get all ancestors
   const ancestors = await getAncestors(node.path, node.tenantId);
 
-  // Collect context/io from each ancestor's subtree
-  // This includes the ancestor itself and its direct children
-  let inherited: Node[] = [];
-
+  const inheritedIds: number[] = [];
   for (const ancestor of ancestors) {
-    // Get context/io that are direct children of this ancestor
-    const subtreeContextIO = await getContextAndIOInSubtree(
-      ancestor.path,
-      node.tenantId,
-      { activeOnly: true }
-    );
-
-    // Only include context/io that are direct children of the ancestor
-    // (not nested deeper in sibling subtrees)
-    const directContextIO = subtreeContextIO.filter((n: Node) => {
-      // Check if this node is a direct child of the ancestor
-      const expectedPrefix = ancestor.path + ".";
-      if (!n.path.startsWith(expectedPrefix)) return false;
-      const remainder = n.path.slice(expectedPrefix.length);
-      // Direct child has no more dots
-      return !remainder.includes(".");
-    });
-
-    inherited.push(...directContextIO);
+    const ancestorIncludes = ancestor.includeDependencyIds ?? [];
+    if (ancestorIncludes.length > 0) {
+      inheritedIds.push(...ancestorIncludes);
+    }
   }
 
-  // Also include context/io that are direct children of the node itself
-  const ownContextIO = await getContextAndIOInSubtree(
-    node.path,
-    node.tenantId,
-    { activeOnly: true }
+  const inheritedFilteredIds = inheritedIds.filter((id) => !excludeSet.has(id));
+  const effectiveIds = Array.from(
+    new Set([...inheritedFilteredIds, ...includeIds])
   );
 
-  const directOwn = ownContextIO.filter((n: Node) => {
-    const expectedPrefix = node.path + ".";
-    if (!n.path.startsWith(expectedPrefix)) return false;
-    const remainder = n.path.slice(expectedPrefix.length);
-    return !remainder.includes(".");
-  });
-
-  inherited.push(...directOwn);
-
-  // Deduplicate inherited
-  inherited = deduplicateNodes(inherited);
-
-  // Apply excludes
-  const afterExclude = inherited.filter((n) => !excludeSet.has(n.id));
-
-  // Add explicit includes
-  let included: Node[] = [];
-  if (includeIds.length > 0) {
-    included = await db.query.nodes.findMany({
-      where: inArray(nodes.id, includeIds),
-    });
-    // Filter out excluded from includes too
-    included = included.filter((n) => !excludeSet.has(n.id));
-  }
-
-  // Combine and deduplicate
-  const allDependencies = deduplicateNodes([...afterExclude, ...included]);
+  const [inherited, included, dependencies] = await Promise.all([
+    inheritedFilteredIds.length > 0
+      ? db.query.nodes.findMany({
+          where: inArray(nodes.id, inheritedFilteredIds),
+        })
+      : Promise.resolve([]),
+    includeIds.length > 0
+      ? db.query.nodes.findMany({
+          where: inArray(nodes.id, includeIds),
+        })
+      : Promise.resolve([]),
+    effectiveIds.length > 0
+      ? db.query.nodes.findMany({
+          where: inArray(nodes.id, effectiveIds),
+        })
+      : Promise.resolve([]),
+  ]);
 
   return {
-    dependencies: allDependencies,
-    inherited: afterExclude,
+    dependencies,
+    inherited,
     included,
     excludedIds: [...excludeSet],
     inheritanceDisabled: false,
@@ -144,8 +110,8 @@ export async function resolveDependencies(
 }
 
 /* ----------------------------------
- * Get Effective Context for Execution
- * Resolves all context nodes for a job/stage execution
+ * Get Effective Context for Planning
+ * Resolves all context nodes for a job/stage plan
  * ---------------------------------- */
 
 export async function getEffectiveContext(
@@ -156,22 +122,15 @@ export async function getEffectiveContext(
 }
 
 /* ----------------------------------
- * Get Effective IO for Execution
- * Resolves all IO nodes for a job/stage execution
+ * Get Effective Data for Planning
+ * Resolves all Data nodes for a job/stage plan
  * ---------------------------------- */
 
-export async function getEffectiveIO(
+export async function getEffectiveData(
   nodeId: number
-): Promise<{ inputs: Node[]; outputs: Node[] }> {
+): Promise<Node[]> {
   const resolved = await resolveDependencies(nodeId);
-  const ioNodes = resolved.dependencies.filter((n) => n.type === "io");
-
-  // To get direction, we need to join with io_nodes table
-  // For now, return all IO nodes (caller should join with ioNodes subnode)
-  return {
-    inputs: ioNodes, // Would filter by direction = 'input'
-    outputs: ioNodes, // Would filter by direction = 'output'
-  };
+  return resolved.dependencies.filter((n) => n.type === "data");
 }
 
 /* ----------------------------------

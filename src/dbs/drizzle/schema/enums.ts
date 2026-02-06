@@ -10,7 +10,8 @@ export const nodeTypeEnum = pgEnum("node_type", [
   "stage",
   "job",
   "context",
-  "io",
+  "data",
+  "collector",
 ]);
 
 /* ----------------------------------
@@ -37,25 +38,11 @@ export const contextTypeEnum = pgEnum("context_type", [
 ]);
 
 /* ----------------------------------
- * IO Direction Enum
- * Whether IO node is input or output
+ * Plan Edge Enums
  * ---------------------------------- */
 
-export const ioDirectionEnum = pgEnum("io_direction", ["input", "output"]);
-
-/* ----------------------------------
- * IO Type Enum
- * Classification of IO data
- * ---------------------------------- */
-
-export const ioTypeEnum = pgEnum("io_type", [
-  "data",
-  "generator",
-  "artifact",
-  "model",
-  "dataset",
-  "url",
-]);
+export const planEdgeKindEnum = pgEnum("plan_edge_kind", ["control", "data"]);
+export const planEdgeRoleEnum = pgEnum("plan_edge_role", ["required", "optional"]);
 
 /* ----------------------------------
  * Execution Status Enum (for execution tables)
@@ -103,8 +90,8 @@ export const replanStatusEnum = pgEnum("replan_status", [
 export type NodeType = (typeof nodeTypeEnum.enumValues)[number];
 export type ExecutionMode = (typeof executionModeEnum.enumValues)[number];
 export type ContextType = (typeof contextTypeEnum.enumValues)[number];
-export type IoDirection = (typeof ioDirectionEnum.enumValues)[number];
-export type IoType = (typeof ioTypeEnum.enumValues)[number];
+export type PlanEdgeKind = (typeof planEdgeKindEnum.enumValues)[number];
+export type PlanEdgeRole = (typeof planEdgeRoleEnum.enumValues)[number];
 export type ExecutionStatus = (typeof executionStatusEnum.enumValues)[number];
 export type ActorType = (typeof actorTypeEnum.enumValues)[number];
 export type ReplanScopeType = (typeof replanScopeTypeEnum.enumValues)[number];

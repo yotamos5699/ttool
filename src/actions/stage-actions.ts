@@ -23,16 +23,22 @@ export interface StageCreateInput {
   parentId: number; // Parent node (plan or stage)
   tenantId: number;
   executionMode?: ExecutionMode;
-  dependsOnNodeIds?: number[];
+  disableDependencyInheritance?: boolean;
+  includeDependencyIds?: number[];
+  excludeDependencyIds?: number[];
+  config?: Record<string, unknown> | null;
 }
 
 export interface StageUpdateInput {
   name?: string;
   description?: string;
   executionMode?: ExecutionMode;
-  dependsOnNodeIds?: number[];
   active?: boolean;
   isFrozen?: boolean;
+  disableDependencyInheritance?: boolean;
+  includeDependencyIds?: number[];
+  excludeDependencyIds?: number[];
+  config?: Record<string, unknown> | null;
 }
 
 export interface StageWithDetails extends Node {
@@ -61,6 +67,10 @@ export async function createStage(data: StageCreateInput): Promise<StageWithDeta
       parentId: data.parentId,
       planId: data.planId,
       tenantId: data.tenantId,
+      disableDependencyInheritance: data.disableDependencyInheritance ?? false,
+      includeDependencyIds: data.includeDependencyIds ?? [],
+      excludeDependencyIds: data.excludeDependencyIds ?? [],
+      config: data.config ?? null,
     })
     .returning();
 
@@ -81,7 +91,6 @@ export async function createStage(data: StageCreateInput): Promise<StageWithDeta
       nodeId: node.id,
       description: data.description ?? null,
       executionMode: data.executionMode ?? "sequential",
-      dependsOnNodeIds: data.dependsOnNodeIds ?? [],
     })
     .returning();
 
@@ -113,7 +122,7 @@ export async function getStage(id: number): Promise<StageWithDetails | null> {
 
 export async function getStagesForPlan(
   planId: number,
-  options?: { activeOnly?: boolean }
+  options?: { activeOnly?: boolean },
 ): Promise<StageWithDetails[]> {
   const conditions = [eq(nodes.planId, planId), eq(nodes.type, "stage")];
 
@@ -151,7 +160,7 @@ export async function getStagesForPlan(
 
 export async function updateStage(
   id: number,
-  data: StageUpdateInput
+  data: StageUpdateInput,
 ): Promise<StageWithDetails | null> {
   const existing = await getStage(id);
   if (!existing) return null;
@@ -161,6 +170,16 @@ export async function updateStage(
   if (data.name !== undefined) nodeUpdates.name = data.name;
   if (data.active !== undefined) nodeUpdates.active = data.active;
   if (data.isFrozen !== undefined) nodeUpdates.isFrozen = data.isFrozen;
+  if (data.disableDependencyInheritance !== undefined) {
+    nodeUpdates.disableDependencyInheritance = data.disableDependencyInheritance;
+  }
+  if (data.includeDependencyIds !== undefined) {
+    nodeUpdates.includeDependencyIds = data.includeDependencyIds;
+  }
+  if (data.excludeDependencyIds !== undefined) {
+    nodeUpdates.excludeDependencyIds = data.excludeDependencyIds;
+  }
+  if (data.config !== undefined) nodeUpdates.config = data.config;
 
   const [updatedNode] = await db
     .update(nodes)
@@ -172,7 +191,6 @@ export async function updateStage(
   const stageUpdates: Partial<StageNode> = {};
   if (data.description !== undefined) stageUpdates.description = data.description;
   if (data.executionMode !== undefined) stageUpdates.executionMode = data.executionMode;
-  if (data.dependsOnNodeIds !== undefined) stageUpdates.dependsOnNodeIds = data.dependsOnNodeIds;
 
   let stageData = existing.stageData;
   if (Object.keys(stageUpdates).length > 0) {
@@ -207,7 +225,7 @@ export async function deleteStage(id: number): Promise<boolean> {
 
 export async function getChildStages(
   parentId: number,
-  options?: { activeOnly?: boolean }
+  options?: { activeOnly?: boolean },
 ): Promise<StageWithDetails[]> {
   const conditions = [eq(nodes.parentId, parentId), eq(nodes.type, "stage")];
 

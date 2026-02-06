@@ -1,22 +1,13 @@
 "use client";
 
 import { create } from "zustand";
-import type { Plan, Stage, Job, ContextNode } from "./types";
-import {
-  updateStageInTree,
-  deleteStageFromTree,
-  addStageToTree,
-} from "./stageTreeUtils";
-import {
-  updateJobInStages,
-  deleteJobFromStages,
-  addJobToStages,
-} from "./jobTreeUtils";
+import type { Plan, ContextNode, PlanNode, PlanEdge } from "./types";
 import {
   addContextToTarget,
   updateContextInPlan,
   deleteContextFromPlan,
 } from "./contextTreeUtils";
+import { flattenPlanNodes } from "./planTreeUtils";
 
 /* ----------------------------------
  * State Types
@@ -27,15 +18,11 @@ type PlanDataState = {
 };
 
 type PlanDataActions = {
+  nodesById: Map<number, PlanNode>;
+  edgesByNodeId: Map<number, PlanEdge[]>;
   setPlan: (plan: Plan) => void;
   clearPlan: () => void;
   updatePlan: (data: Partial<Plan>) => void;
-  updateStage: (id: number, data: Partial<Stage>) => void;
-  updateJob: (id: number, data: Partial<Job>) => void;
-  addStage: (stage: Stage) => void;
-  addJob: (job: Job) => void;
-  deleteStage: (id: number) => void;
-  deleteJob: (id: number) => void;
   addContext: (
     context: ContextNode,
     targetType: "plan" | "stage" | "job",
@@ -50,10 +37,37 @@ type PlanDataStore = PlanDataState & PlanDataActions;
 /* ----------------------------------
  * Store
  * ---------------------------------- */
+export const setEdgesByNodeId = (plan: Plan) => {
+  const edgesByNodeId = new Map<number, PlanEdge[]>();
+  for (const edge of plan.edges) {
+    if (!edgesByNodeId.has(edge.fromNodeId)) {
+      edgesByNodeId.set(edge.fromNodeId, []);
+    }
+    if (!edgesByNodeId.has(edge.toNodeId)) {
+      edgesByNodeId.set(edge.toNodeId, []);
+    }
+    edgesByNodeId.get(edge.fromNodeId)!.push(edge);
+    edgesByNodeId.get(edge.toNodeId)!.push(edge);
+  }
+  usePlanDataStore.setState({ edgesByNodeId });
+};
 
+export const useEdgesByNodeId = (id: number) =>
+  usePlanDataStore((s) => s.edgesByNodeId).get(id);
+export const setNodesById = (plan: Plan) => {
+  const nodesById = new Map<number, PlanNode>();
+  for (const item of flattenPlanNodes(plan.parts)) {
+    nodesById.set(item.id, item);
+  }
+  usePlanDataStore.setState({ nodesById });
+};
+export const useNodesById = () => usePlanDataStore((s) => s.nodesById);
+export const useNodeById = (id: number) => usePlanDataStore((s) => s.nodesById).get(id);
+export const getNodeById = (id: number) => usePlanDataStore.getState().nodesById.get(id);
 export const usePlanDataStore = create<PlanDataStore>()((set) => ({
   plan: null,
-
+  nodesById: new Map(),
+  edgesByNodeId: new Map(),
   setPlan: (plan) => set({ plan }),
 
   clearPlan: () => set({ plan: null }),
@@ -61,75 +75,6 @@ export const usePlanDataStore = create<PlanDataStore>()((set) => ({
   updatePlan: (data) =>
     set((state) => ({
       plan: state.plan ? { ...state.plan, ...data } : null,
-    })),
-
-  updateStage: (id, data) =>
-    set((state) => ({
-      plan: state.plan
-        ? {
-            ...state.plan,
-            stages: updateStageInTree(state.plan.stages, id, data),
-          }
-        : null,
-    })),
-
-  updateJob: (id, data) =>
-    set((state) => ({
-      plan: state.plan
-        ? {
-            ...state.plan,
-            stages: updateJobInStages(state.plan.stages, id, data),
-          }
-        : null,
-    })),
-
-  addStage: (stage) =>
-    set((state) => ({
-      plan: state.plan
-        ? {
-            ...state.plan,
-            stages: addStageToTree(
-              state.plan.stages,
-              stage,
-              stage.parentStageId,
-            ),
-          }
-        : null,
-    })),
-
-  addJob: (job) =>
-    set((state) => ({
-      plan: state.plan
-        ? {
-            ...state.plan,
-            stages: addJobToStages(
-              state.plan.stages,
-              job,
-              job.stageId,
-              job.parentJobId,
-            ),
-          }
-        : null,
-    })),
-
-  deleteStage: (id) =>
-    set((state) => ({
-      plan: state.plan
-        ? {
-            ...state.plan,
-            stages: deleteStageFromTree(state.plan.stages, id),
-          }
-        : null,
-    })),
-
-  deleteJob: (id) =>
-    set((state) => ({
-      plan: state.plan
-        ? {
-            ...state.plan,
-            stages: deleteJobFromStages(state.plan.stages, id),
-          }
-        : null,
     })),
 
   addContext: (context, targetType, targetId) =>

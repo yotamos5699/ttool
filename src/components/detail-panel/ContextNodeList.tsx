@@ -17,7 +17,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { usePlanDataStore, type ContextNode } from "@/stores/plan";
+import { type ContextNode } from "@/stores/plan";
 import { usePlanMutations } from "@/hooks/usePlanMutations";
 import type { ContextType } from "@/dbs/drizzle/schema";
 
@@ -42,8 +42,7 @@ function ContextNodeItem({ node }: { node: ContextNode }) {
   const [type, setType] = useState(node.type);
   const [payload, setPayload] = useState(node.payload);
 
-  const planId = usePlanDataStore((s) => s.plan?.id ?? 0);
-  const { updateContext, deleteContext } = usePlanMutations(planId);
+  const { updateContext, deleteContext } = usePlanMutations();
 
   const typeConfig = contextTypes.find((t) => t.value === node.type) || contextTypes[4];
 
@@ -172,8 +171,7 @@ export function ContextNodeList({
   targetId,
   targetType,
 }: ContextNodeListProps) {
-  const planId = usePlanDataStore((s) => s.plan?.id ?? 0);
-  const { createContext } = usePlanMutations(planId);
+  const { createContext } = usePlanMutations();
 
   const handleAdd = () => {
     createContext.mutate({
@@ -189,7 +187,12 @@ export function ContextNodeList({
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold">Context Nodes</h3>
-        <Button onClick={handleAdd} variant="outline" size="sm" disabled={createContext.isPending}>
+        <Button
+          onClick={handleAdd}
+          variant="outline"
+          size="sm"
+          disabled={createContext.isPending}
+        >
           {createContext.isPending ? "Adding..." : "+ Add Context"}
         </Button>
       </div>
@@ -208,7 +211,7 @@ export function ContextNodeList({
 
       <div className="text-xs text-muted-foreground">
         Context nodes define requirements, constraints, decisions, code snippets, or notes
-        that guide execution.
+        that guide planning.
       </div>
     </div>
   );

@@ -1,13 +1,6 @@
 "use client";
 
-import {
-  FolderTree,
-  Plus,
-  ChevronDown,
-  ChevronRight,
-  RefreshCw,
-  Users,
-} from "lucide-react";
+import { FolderTree, Plus, ChevronDown, ChevronRight, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -15,15 +8,11 @@ import { Separator } from "@/components/ui/separator";
 import { StageNode } from "./StageNode";
 import { cn } from "@/lib/utils";
 import { usePlanDataStore, useUIStore, useWSStore } from "@/stores/plan";
-import { SelectionStats } from "@/components/plan-tree/SelectionStats";
+import { NodeStyleMarker } from "./NodeStyleMarker";
 
 export function PlanTree() {
   const plan = usePlanDataStore((s) => s.plan);
-  const selection = useUIStore((s) => s.selection);
-  const setSelection = useUIStore((s) => s.setSelection);
-  const selectedNodesByPlan = useUIStore((s) => s.selectedNodesByPlan);
-  const blastRadiusByPlan = useUIStore((s) => s.blastRadiusByPlan);
-  const clearSelections = useUIStore((s) => s.clearSelections);
+  const setSelection = useUIStore((s) => s.selectNode);
 
   if (!plan) {
     return (
@@ -33,15 +22,11 @@ export function PlanTree() {
     );
   }
 
-  // Filter to root stages only (no parent)
-  const rootStages = plan.stages.filter((s) => !s.parentStageId);
+  const rootParts = plan.parts.filter((node) => node.type === "stage");
 
   const handleSelectPlan = () => {
-    setSelection({ id: plan.id, type: "plan" });
+    setSelection({ id: plan.id, mode: "focus" });
   };
-
-  const selectedNodes = selectedNodesByPlan[plan.id] || [];
-  const blastRadius = blastRadiusByPlan[plan.id] || [];
 
   return (
     <>
@@ -49,11 +34,13 @@ export function PlanTree() {
         {/* Plan Info */}
         <div
           className={cn(
-            "px-4 py-2 border-b cursor-pointer hover:bg-muted/50 transition-colors",
-            selection?.type === "plan" && "bg-primary/10 border-l-2 border-l-primary",
+            "px-4 relative py-2 border-b cursor-pointer hover:bg-muted/50 transition-colors",
+            //  === "plan" && "bg-primary/10 border-l-2 border-l-primary",
           )}
           onPointerDown={handleSelectPlan}
         >
+          <NodeStyleMarker nodeId={plan.id} type="plan" />
+
           <div className="font-medium truncate">{plan.name}</div>
           <div className="text-xs text-muted-foreground truncate">{plan.goal}</div>
           {plan.contextNodes.length > 0 && (
@@ -68,30 +55,16 @@ export function PlanTree() {
         {/* Tree */}
         <ScrollArea className="flex-1">
           <div className="p-2">
-            {rootStages.length === 0 ? (
+            {rootParts.length === 0 ? (
               <EmptyState />
             ) : (
-              rootStages.map((stage) => (
+              rootParts.map((stage) => (
                 <StageNode key={stage.id} stage={stage} depth={0} />
               ))
             )}
           </div>
         </ScrollArea>
-
-        {/* Blast Radius Indicator */}
-      {(blastRadius.length > 0 || selectedNodes.length > 0) && (
-        <BlastRadiusBar
-          blastCount={blastRadius.length}
-          selectedCount={selectedNodes.length}
-          onClearSelections={() => clearSelections(plan.id)}
-        />
-      )}
       </div>
-      <SelectionStats
-        selectedCount={selectedNodes.length}
-        blastCount={blastRadius.length}
-        onClearSelections={() => clearSelections(plan.id)}
-      />
     </>
   );
 }
@@ -100,38 +73,11 @@ function EmptyState() {
   return (
     <div className="text-center py-8 text-muted-foreground">
       <FolderTree className="h-8 w-8 mx-auto mb-2 opacity-50" />
-      <p className="text-sm">No stages yet</p>
+      <p className="text-sm">No parts yet</p>
       <Button variant="outline" size="sm" className="mt-2">
         <Plus className="h-4 w-4 mr-1" />
-        Add Stage
+        Add Part
       </Button>
-    </div>
-  );
-}
-
-function BlastRadiusBar({
-  blastCount,
-  selectedCount,
-  onClearSelections,
-}: {
-  blastCount: number;
-  selectedCount: number;
-  onClearSelections: () => void;
-}) {
-  return (
-    <div className="px-4 py-2 border-t bg-card text-xs flex items-center justify-between">
-      <div className="flex items-center gap-2 text-warning">
-        <RefreshCw className="h-4 w-4" />
-        <span>Blast radius: {blastCount} nodes</span>
-      </div>
-      <div className="flex items-center gap-3">
-        <span className="text-muted-foreground">
-          Selected: {selectedCount}
-        </span>
-        <Button variant="outline" size="sm" onClick={onClearSelections}>
-          Clear selection
-        </Button>
-      </div>
     </div>
   );
 }

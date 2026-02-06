@@ -21,7 +21,7 @@ export function createPathSegment(type: NodeType, id: number): string {
  * Parse a path segment into type and id
  */
 export function parsePathSegment(segment: string): { type: NodeType; id: number } | null {
-  const match = segment.match(/^(plan|stage|job|context|io)_(\d+)$/);
+  const match = segment.match(/^(plan|stage|job|context|data|collector)_(\d+)$/);
   if (!match) return null;
   return {
     type: match[1] as NodeType,

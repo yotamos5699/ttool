@@ -70,17 +70,17 @@ export default function Home() {
 //   "stage",
 //   "job",
 //   "context",
-//   "io",
+//   "data",
 //
 //
 // ]);
-// no need for ioEnvelopes its better to use io seprate in/out nodes
+// no need for envelopes; use data nodes
 // export const ttoolNodes = pgTable(
 //   "nodes",
 //   {
 // disable_dependency_inheritance: boolean().default(false).notNull(),
-// include_dependency_ids: integer().array().default([]),// context or io ids to include
-// exclude_dependency_ids: integer().array().default([]),// context or io ids to include
+// include_dependency_ids: integer().array().default([]),// context or data ids to include
+// exclude_dependency_ids: integer().array().default([]),// context or data ids to include
 // id: integer().primaryKey().generatedAlwaysAsIdentity(),
 //   active: boolean().default(true).notNull(),
 //   tenantId: integer(),
@@ -95,7 +95,7 @@ export default function Home() {
 //     path: text().notNull(),
 //     depth: integer().notNull(),
 
-//     stageId: integer()
+//     parentId: integer()
 //       .notNull()
 //       .references(() => stageNodes.id, { onDelete: "cascade" }),
 //     planId: integer()
@@ -122,16 +122,16 @@ export default function Home() {
 //     index("nodes_flow_depth_idx").on(table.planId, table.depth),
 //   ],
 // );
-// for optimizing cache and query sizes context and io should be queried ones based on path prefixes
-// example for context/io nodes access in a stage/job tree
+// for optimizing cache and query sizes context and data should be queried ones based on path prefixes
+// example for context/data nodes access in a stage/job tree
 // plan 1
 //  stage 1
 //   job 1
-//     context/io nodes with path: /plan_1/stage_1/job_1([context1,context2,io1])
+//     context/data nodes with path: /plan_1/stage_1/job_1([context1,context2,data1])
 //   job 2 exclude_dependency_ids: [context1]
-//     context/io nodes with path: /plan_1/stage_1/job_2([context2,io1])
+//     context/data nodes with path: /plan_1/stage_1/job_2([context2,data1])
 //     job 3 include_dependency_ids: [contex3]
-//       context/io nodes with path: /plan_1/stage_1/job_3([context2,context3,io1])
+//       context/data nodes with path: /plan_1/stage_1/job_3([context2,context3,data1])
 //  stage 2
 //   job 4
 // we need a better indexing strategy for path based queries
@@ -149,16 +149,15 @@ Goal:
 Remodel the app around a hierarchical node system based on a single generic ToolNode model.
 
 High-level design:
-- Use a single `nodes` table to represent stages, jobs, context, and IO
+  - Use a single `nodes` table to represent parts, jobs, context, and data
 - Hierarchy is represented via a path-based structure (use PostgreSQL ltree)
-- Context and IO are modeled as nodes (no ioEnvelopes)
-- IO is split into explicit input/output nodes
+- Context and data are modeled as nodes
 
 Node types:
 - stage
 - job
 - context
-- io
+- data
 
 Key behavior:
 - Dependency inheritance is enabled by default
@@ -174,7 +173,7 @@ Base node general ref, u can modify if needed, using ltree prefered (Drizzle ORM
   - depth
   - parentId (self-referencing FK)
   - planId (FK)
-  - stageId (FK, required for jobs)
+  - parentId (hierarchy root by path)
   - tenantId (FK)
   - active (boolean)
   - isFrozen (boolean)
@@ -196,19 +195,19 @@ then we can use a subnode structure for specific node types if needed, e.g.:
 - stageNodes
 - jobNodes
 - contextNodes
-- ioNodes
+- dataNodes
 
 Query model:
-- Context and IO nodes are resolved by querying once per subtree using path prefixes
+- Context and data nodes are resolved by querying once per subtree using path prefixes
 - Example hierarchy:
  plan 1
   stage 1
    job 1
-     context/io nodes with path: /plan_1/stage_1/job_1([context1,context2,io1])
+     context/data nodes with path: /plan_1/stage_1/job_1([context1,context2,data1])
    job 2 exclude_dependency_ids: [context1]
-     context/io nodes with path: /plan_1/stage_1/job_2([context2,io1])
+     context/data nodes with path: /plan_1/stage_1/job_2([context2,data1])
      job 3 include_dependency_ids: [contex3]
-       context/io nodes with path: /plan_1/stage_1/job_3([context2,context3,io1]) 
+       context/data nodes with path: /plan_1/stage_1/job_3([context2,context3,data1]) 
   stage 2
    job 4
 

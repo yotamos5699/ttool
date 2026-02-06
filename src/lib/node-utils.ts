@@ -1,6 +1,12 @@
-import type { Node, NodeType } from "@/dbs/drizzle/schema";
+import type { Node, NodeType, PlanEdge } from "@/dbs/drizzle/schema";
 import { buildPath, getPathDepth } from "./ltree";
-import type { Plan, Stage, Job, ContextNode as StoreContextNode } from "@/stores/planStore";
+import type {
+  Plan,
+  PlanNode as StorePlanNode,
+  ContextNode as StoreContextNode,
+  PlanEdge as StorePlanEdge,
+  NodeDependencies,
+} from "@/stores/plan";
 
 /**
  * Node Utility Functions
@@ -46,16 +52,13 @@ export function prepareNodeForInsert(params: {
 /**
  * Group nodes by type
  */
-export function groupNodesByType(nodes: Node[]): Record<NodeType, Node[]> {
-  const groups: Record<NodeType, Node[]> = {
-    plan: [],
-    stage: [],
-    job: [],
-    context: [],
-    io: [],
-  };
+export function groupNodesByType(nodes: Node[]): Record<string, Node[]> {
+  const groups: Record<string, Node[]> = {};
 
   for (const node of nodes) {
+    if (!groups[node.type]) {
+      groups[node.type] = [];
+    }
     groups[node.type].push(node);
   }
 
@@ -66,9 +69,7 @@ export function groupNodesByType(nodes: Node[]): Record<NodeType, Node[]> {
  * Sort nodes by depth (ancestors first)
  */
 export function sortNodesByDepth(nodes: Node[], ascending = true): Node[] {
-  return [...nodes].sort((a, b) =>
-    ascending ? a.depth - b.depth : b.depth - a.depth
-  );
+  return [...nodes].sort((a, b) => (ascending ? a.depth - b.depth : b.depth - a.depth));
 }
 
 /**
@@ -181,12 +182,12 @@ export function hasDependencyInheritance(node: Node): boolean {
 export function applyDependencyFilters(
   allDependencies: Node[],
   excludeIds: number[],
-  includeIds: number[]
+  includeIds: number[],
 ): Node[] {
   const excludeSet = new Set(excludeIds);
 
   // Filter out excluded
-  let result = allDependencies.filter((n) => !excludeSet.has(n.id));
+  const result = allDependencies.filter((n) => !excludeSet.has(n.id));
 
   // Note: includeIds would add nodes that aren't in allDependencies
   // This function only filters the provided dependencies
@@ -199,116 +200,135 @@ export function applyDependencyFilters(
  * Convert flat node list to nested Plan structure for the store
  * This bridges the new flat node schema with the existing store/components
  */
-export function nodesToPlan(planNode: Node, allNodes: Node[], planData?: { goal: string; version: number; parentVersion: number | null }): Plan {
+export function nodesToPlan(params: {
+  planNode: Node;
+  nodes: Node[];
+  planData?: { goal: string; version: number; parentVersion: number | null };
+  contextDataByNodeId: Map<number, { contextType: string; payload: string }>;
+  stageDataByNodeId: Map<number, { description: string | null; executionMode: string }>;
+  jobDataByNodeId: Map<number, { description: string | null }>;
+  dataDataByNodeId: Map<number, { payload: unknown }>;
+  planEdges: PlanEdge[];
+}): Plan {
   const nodeMap = new Map<number, Node>();
-  for (const node of allNodes) {
+  for (const node of params.nodes) {
     nodeMap.set(node.id, node);
   }
 
-  // Group nodes by type
-  const groups = groupNodesByType(allNodes);
-  
-  // Build context nodes lookup by parent
-  const contextByParent = new Map<number, StoreContextNode[]>();
-  for (const ctx of groups.context) {
-    const parentId = ctx.parentId;
-    if (parentId) {
-      if (!contextByParent.has(parentId)) {
-        contextByParent.set(parentId, []);
-      }
-      contextByParent.get(parentId)!.push({
-        id: ctx.id,
-        level: ctx.type, // context type
-        type: ctx.name, // using name as type for now
-        title: ctx.name,
-        payload: "", // Would need to join with contextNodes table
-      });
-    }
+  const groups = groupNodesByType(params.nodes);
+  const nodesByType: Record<string, number[]> = {};
+  for (const [type, items] of Object.entries(groups)) {
+    nodesByType[type] = items.map((node) => node.id);
   }
 
-  // Build jobs map with children
-  const jobMap = new Map<number, Job>();
-  const jobsByStage = new Map<number, Job[]>();
-  
-  for (const jobNode of groups.job) {
-    const job: Job = {
+  const contextByParent = new Map<number, StoreContextNode[]>();
+  for (const ctx of groups.context ?? []) {
+    const parentId = ctx.parentId;
+    if (!parentId) continue;
+    const ctxData = params.contextDataByNodeId.get(ctx.id);
+    const contextNode: StoreContextNode = {
+      id: ctx.id,
+      level: String(ctx.type),
+      type: ctxData?.contextType ?? "note",
+      title: ctx.name,
+      payload: ctxData?.payload ?? "",
+    };
+    const list = contextByParent.get(parentId) ?? [];
+    list.push(contextNode);
+    contextByParent.set(parentId, list);
+  }
+
+  const dataNodesByParent = new Map<number, number[]>();
+  for (const dataNode of groups.data ?? []) {
+    if (!dataNode.parentId) continue;
+    const list = dataNodesByParent.get(dataNode.parentId) ?? [];
+    list.push(dataNode.id);
+    dataNodesByParent.set(dataNode.parentId, list);
+  }
+
+  const dependenciesByNodeId = new Map<number, NodeDependencies>();
+  for (const node of params.nodes) {
+    dependenciesByNodeId.set(node.id, {
+      includeDependencyIds: node.includeDependencyIds ?? [],
+      excludeDependencyIds: node.excludeDependencyIds ?? [],
+      disableDependencyInheritance: node.disableDependencyInheritance ?? false,
+    });
+  }
+
+  const edges: StorePlanEdge[] = params.planEdges.map((edge) => ({
+    id: edge.id,
+    fromNodeId: edge.fromNodeId,
+    toNodeId: edge.toNodeId,
+    kind: edge.kind,
+    role: edge.role ?? undefined,
+  }));
+
+  const jobMap = new Map<number, StorePlanNode>();
+
+  for (const jobNode of groups.job ?? []) {
+    const jobData = params.jobDataByNodeId.get(jobNode.id);
+    const job: StorePlanNode = {
       id: jobNode.id,
-      stageId: jobNode.stageId ?? 0,
-      parentJobId: jobNode.parentId && nodeMap.get(jobNode.parentId)?.type === "job" ? jobNode.parentId : null,
+      type: "job",
       title: jobNode.name,
-      description: null, // Description is in jobNodes subnode table
-      dependsOn: [],
-      dependsOnStages: [],
-      dependsOnJobs: [],
-      childJobs: [],
+      description: jobData?.description ?? null,
+      childNodes: [],
       contextNodes: contextByParent.get(jobNode.id) ?? [],
+      dependencies: dependenciesByNodeId.get(jobNode.id) ?? {
+        includeDependencyIds: [],
+        excludeDependencyIds: [],
+        disableDependencyInheritance: false,
+      },
+      dataNodeIds: dataNodesByParent.get(jobNode.id) ?? [],
     };
     jobMap.set(jobNode.id, job);
   }
 
-  // Link job children
-  for (const job of jobMap.values()) {
-    if (job.parentJobId && jobMap.has(job.parentJobId)) {
-      jobMap.get(job.parentJobId)!.childJobs!.push(job);
-    } else {
-      // Root job - add to stage
-      const stageId = job.stageId;
-      if (!jobsByStage.has(stageId)) {
-        jobsByStage.set(stageId, []);
-      }
-      jobsByStage.get(stageId)!.push(job);
-    }
-  }
+  const buildPlanNodeTree = (parentId: number): StorePlanNode[] => {
+    const children = params.nodes.filter((node) => node.parentId === parentId);
+    return children.map((child) => {
+      const ctx = contextByParent.get(child.id) ?? [];
+      const dataNodeIds = dataNodesByParent.get(child.id) ?? [];
+      const deps = dependenciesByNodeId.get(child.id) ?? {
+        includeDependencyIds: [],
+        excludeDependencyIds: [],
+        disableDependencyInheritance: false,
+      };
+      const stageData = params.stageDataByNodeId.get(child.id);
+      const jobData = params.jobDataByNodeId.get(child.id);
+      const description = stageData?.description ?? jobData?.description ?? null;
 
-  // Build stages map with children
-  const stageMap = new Map<number, Stage>();
-  const stagesByParent = new Map<number | null, Stage[]>();
-
-  for (const stageNode of groups.stage) {
-    const parentStageId = stageNode.parentId && nodeMap.get(stageNode.parentId)?.type === "stage" 
-      ? stageNode.parentId 
-      : null;
-    
-    const stage: Stage = {
-      id: stageNode.id,
-      planId: stageNode.planId ?? planNode.id,
-      parentStageId,
-      title: stageNode.name,
-      description: null, // Description is in stageNodes subnode table
-      executionMode: "sequential", // Would need to join with stageNodes table
-      dependsOn: [],
-      dependsOnStages: [],
-      childStages: [],
-      jobs: jobsByStage.get(stageNode.id) ?? [],
-      contextNodes: contextByParent.get(stageNode.id) ?? [],
-    };
-    stageMap.set(stageNode.id, stage);
-  }
-
-  // Link stage children
-  for (const stage of stageMap.values()) {
-    if (stage.parentStageId && stageMap.has(stage.parentStageId)) {
-      stageMap.get(stage.parentStageId)!.childStages!.push(stage);
-    } else {
-      // Root stage
-      const key = stage.parentStageId;
-      if (!stagesByParent.has(key)) {
-        stagesByParent.set(key, []);
-      }
-      stagesByParent.get(key)!.push(stage);
-    }
-  }
-
-  // Build plan
-  const plan: Plan = {
-    id: planNode.id,
-    name: planNode.name,
-    goal: planData?.goal ?? "",
-    version: planData?.version ?? 1,
-    parentVersion: planData?.parentVersion ?? null,
-    stages: stagesByParent.get(null) ?? [],
-    contextNodes: contextByParent.get(planNode.id) ?? [],
+      return {
+        id: child.id,
+        type: child.type as "stage" | "job" | "context" | "data",
+        title: child.name,
+        description,
+        executionMode: stageData?.executionMode as "sequential" | "parallel" | undefined,
+        contextNodes: ctx,
+        dataNodeIds,
+        dependencies: deps,
+        childNodes: buildPlanNodeTree(child.id),
+      };
+    });
   };
 
-  return plan;
+  const planDependencies = dependenciesByNodeId.get(params.planNode.id) ?? {
+    includeDependencyIds: [],
+    excludeDependencyIds: [],
+    disableDependencyInheritance: false,
+  };
+
+  return {
+    id: params.planNode.id,
+    name: params.planNode.name,
+    goal: params.planData?.goal ?? "",
+    version: params.planData?.version ?? 1,
+    parentVersion: params.planData?.parentVersion ?? null,
+    parts: buildPlanNodeTree(params.planNode.id),
+    contextNodes: contextByParent.get(params.planNode.id) ?? [],
+    dependencies: planDependencies,
+    dataNodeIds: dataNodesByParent.get(params.planNode.id) ?? [],
+    edges,
+    nodesByType,
+  };
 }

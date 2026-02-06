@@ -1,13 +1,13 @@
 // Types
 export type {
   ContextNode,
-  Job,
-  IOEnvelope,
-  Stage,
   Plan,
+  PlanNode,
   Selection,
   NodeType,
   NodeKey,
+  NodeDependencies,
+  PlanEdge,
   WSMessageType,
   WSMessage,
   WsState,
@@ -20,32 +20,6 @@ export { useUIStore } from "./uiStore";
 export { useWSStore } from "./wsStore";
 
 // Utilities
-export {
-  findStage,
-  findJob,
-  getAllStages,
-  getAllJobs,
-  getAllJobsFromList,
-  toNodeKey,
-  parseNodeKey,
-  getSelectionKeys,
-  computeBlastRadiusForSelection,
-} from "./blastRadius";
+export { flattenPlanNodes, findPlanNode, updatePlanNode } from "./planTreeUtils";
 
-export {
-  updateStageInTree,
-  deleteStageFromTree,
-  addStageToTree,
-} from "./stageTreeUtils";
-
-export {
-  updateJobInStages,
-  deleteJobFromStages,
-  addJobToStages,
-} from "./jobTreeUtils";
-
-export {
-  addContextToTarget,
-  updateContextInPlan,
-  deleteContextFromPlan,
-} from "./contextTreeUtils";
+export { addContextToTarget, updateContextInPlan, deleteContextFromPlan } from "./contextTreeUtils";

@@ -17,7 +17,7 @@ export * from "./plan-actions";
 export * from "./stage-actions";
 export * from "./job-actions";
 export * from "./context-actions";
-export * from "./io-actions";
+export * from "./data-actions";
 
 // Execution tracking
 export * from "./execution-actions";

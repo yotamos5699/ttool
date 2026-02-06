@@ -19,6 +19,7 @@ export type NodeCreateInput = {
   disableDependencyInheritance?: boolean;
   includeDependencyIds?: number[];
   excludeDependencyIds?: number[];
+  config?: Record<string, unknown> | null;
 };
 
 export type NodeUpdateInput = Partial<{
@@ -28,6 +29,7 @@ export type NodeUpdateInput = Partial<{
   disableDependencyInheritance: boolean;
   includeDependencyIds: number[];
   excludeDependencyIds: number[];
+  config: Record<string, unknown> | null;
 }>;
 
 /* ----------------------------------
@@ -62,6 +64,7 @@ export async function createNode(data: NodeCreateInput): Promise<Node> {
       disableDependencyInheritance: data.disableDependencyInheritance ?? false,
       includeDependencyIds: data.includeDependencyIds ?? [],
       excludeDependencyIds: data.excludeDependencyIds ?? [],
+      config: data.config ?? null,
     })
     .returning();
 

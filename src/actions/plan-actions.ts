@@ -1,15 +1,11 @@
 "use server";
 
 import { db } from "@/dbs/drizzle";
-import {
-  nodes,
-  planNodes,
-  type Node,
-  type PlanNode,
-} from "@/dbs/drizzle/schema";
+import { nodes, type Node } from "@/dbs/drizzle/schema";
 import { eq, and } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { buildPath, getPathDepth } from "@/lib/ltree";
+import { buildPath } from "@/lib/ltree";
+import { plans } from "@/dbs/drizzle/schema/plan-nodes";
 
 /* ----------------------------------
  * Types
@@ -21,6 +17,10 @@ export interface PlanCreateInput {
   tenantId: number;
   version?: number;
   parentVersion?: number;
+  disableDependencyInheritance?: boolean;
+  includeDependencyIds?: number[];
+  excludeDependencyIds?: number[];
+  config?: Record<string, unknown> | null;
 }
 
 export interface PlanUpdateInput {
@@ -29,6 +29,10 @@ export interface PlanUpdateInput {
   version?: number;
   active?: boolean;
   isFrozen?: boolean;
+  disableDependencyInheritance?: boolean;
+  includeDependencyIds?: number[];
+  excludeDependencyIds?: number[];
+  config?: Record<string, unknown> | null;
 }
 
 export interface PlanWithDetails extends Node {
@@ -52,6 +56,10 @@ export async function createPlan(data: PlanCreateInput): Promise<PlanWithDetails
       parentId: null,
       planId: null, // Will be set to self
       tenantId: data.tenantId,
+      disableDependencyInheritance: data.disableDependencyInheritance ?? false,
+      includeDependencyIds: data.includeDependencyIds ?? [],
+      excludeDependencyIds: data.excludeDependencyIds ?? [],
+      config: data.config ?? null,
     })
     .returning();
 
@@ -65,9 +73,11 @@ export async function createPlan(data: PlanCreateInput): Promise<PlanWithDetails
 
   // Insert plan-specific data
   const [planData] = await db
-    .insert(planNodes)
+    .insert(plans)
     .values({
-      nodeId: node.id,
+      // nodeId: node.id,
+
+      active: true,
       goal: data.goal,
       version: data.version ?? 1,
       parentVersion: data.parentVersion ?? null,
@@ -89,7 +99,7 @@ export async function getPlan(id: number): Promise<PlanWithDetails | null> {
 
   if (!node) return null;
 
-  const planData = await db.query.planNodes.findFirst({
+  const planData = await db.query.pl.findFirst({
     where: eq(planNodes.nodeId, id),
   });
 
@@ -100,11 +110,12 @@ export async function getPlan(id: number): Promise<PlanWithDetails | null> {
  * Get All Plans for Tenant
  * ---------------------------------- */
 
-export async function getPlans(
-  options?: { tenantId?: number; activeOnly?: boolean }
-): Promise<PlanWithDetails[]> {
+export async function getPlans(options?: {
+  tenantId?: number;
+  activeOnly?: boolean;
+}): Promise<PlanWithDetails[]> {
   const conditions = [eq(nodes.type, "plan")];
-  
+
   // If tenantId provided, filter by it
   if (options?.tenantId) {
     conditions.push(eq(nodes.tenantId, options.tenantId));
@@ -133,7 +144,7 @@ export async function getPlans(
       }
     }
   }
-
+  console.log("Fetched plans:", { count: planNodesResult.length });
   return planNodesResult.map((n) => ({
     ...n,
     planData: planDataMap.get(n.id) ?? null,
@@ -146,7 +157,7 @@ export async function getPlans(
 
 export async function updatePlan(
   id: number,
-  data: PlanUpdateInput
+  data: PlanUpdateInput,
 ): Promise<PlanWithDetails | null> {
   const existing = await getPlan(id);
   if (!existing) return null;
@@ -156,6 +167,16 @@ export async function updatePlan(
   if (data.name !== undefined) nodeUpdates.name = data.name;
   if (data.active !== undefined) nodeUpdates.active = data.active;
   if (data.isFrozen !== undefined) nodeUpdates.isFrozen = data.isFrozen;
+  if (data.disableDependencyInheritance !== undefined) {
+    nodeUpdates.disableDependencyInheritance = data.disableDependencyInheritance;
+  }
+  if (data.includeDependencyIds !== undefined) {
+    nodeUpdates.includeDependencyIds = data.includeDependencyIds;
+  }
+  if (data.excludeDependencyIds !== undefined) {
+    nodeUpdates.excludeDependencyIds = data.excludeDependencyIds;
+  }
+  if (data.config !== undefined) nodeUpdates.config = data.config;
 
   const [updatedNode] = await db
     .update(nodes)
@@ -203,7 +224,7 @@ export async function deletePlan(id: number): Promise<boolean> {
 
 export async function forkPlan(
   planId: number,
-  options?: { name?: string; tenantId?: number }
+  options?: { name?: string; tenantId?: number },
 ): Promise<PlanWithDetails | null> {
   const original = await getPlan(planId);
   if (!original || !original.planData) return null;
@@ -216,7 +237,7 @@ export async function forkPlan(
     parentVersion: original.planData.version,
   });
 
-  // TODO: Deep copy all child nodes (stages, jobs, context, io)
+  // TODO: Deep copy all child nodes (parts, jobs, context, data)
 
   return newPlan;
 }

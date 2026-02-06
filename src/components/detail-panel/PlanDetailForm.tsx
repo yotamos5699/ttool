@@ -13,7 +13,7 @@ export function PlanDetailForm() {
   const [name, setName] = useState(plan?.name ?? "");
   const [goal, setGoal] = useState(plan?.goal ?? "");
 
-  const { updatePlan } = usePlanMutations(plan?.id ?? 0);
+  const { updatePlan } = usePlanMutations();
 
   if (!plan) return null;
 
@@ -85,9 +85,7 @@ export function PlanDetailForm() {
         )}
       </div>
 
-      <div className="text-xs text-muted-foreground pt-2">
-        Plan ID: {plan.id}
-      </div>
+      <div className="text-xs text-muted-foreground pt-2">Plan ID: {plan.id}</div>
     </div>
   );
 }

@@ -1,6 +1,5 @@
 "use client";
 
-import { useMemo } from "react";
 import {
   ChevronRight,
   ChevronDown,
@@ -34,63 +33,46 @@ import { Badge } from "@/components/ui/badge";
 import { InlineText } from "@/components/inline-edit/InlineText";
 import { JobNode } from "./JobNode";
 import { cn } from "@/lib/utils";
-import { usePlanDataStore, useUIStore, Stage } from "@/stores/plan";
+import { usePlanDataStore, useUIStore, PlanNode } from "@/stores/plan";
 import { usePlanMutations } from "@/hooks/usePlanMutations";
-import { handlePointerDown, useNodeStyle } from "./helper";
-import { NodeStyleMarker } from "./NodeStyleMarker";
+import { handlePointerDown } from "./helper";
+import { toggleExpandNode } from "@/stores/plan/uiStore";
+import { useIsOpen } from "@/hooks/useIsOpen";
 
 type StageNodeProps = {
-  stage: Stage;
+  stage: PlanNode;
   depth: number;
 };
 
 export function StageNode({ stage, depth }: StageNodeProps) {
   // Get state from store
-  // const blastRadiusByPlan = useUIStore((s) => s.blastRadiusByPlan);
-  // const selectedNodesByPlan = useUIStore((s) => s.selectedNodesByPlan);
 
   const planId = usePlanDataStore((s) => s.plan?.id ?? 0);
-  const allExpanded = useUIStore((s) => s.allExpanded);
-  const openStagesByPlan = useUIStore((s) => s.openStagesByPlan);
-  const setStageOpen = useUIStore((s) => s.setStageOpen);
 
-  const { updateStage } = usePlanMutations(planId);
+  const { updateStage } = usePlanMutations();
 
-  const hasChildren =
-    (stage.childStages?.length || 0) > 0 || (stage.jobs?.length || 0) > 0;
-  // const selectedNodes = selectedNodesByPlan[planId] || [];
-  // const blastRadius = blastRadiusByPlan[planId] || [];
-  // const nodeKey = `stage:${stage.id}` as const;
-  // const isSelected = selectedNodes.includes(nodeKey);
-  // const isAffected = blastRadius.includes(nodeKey);
+  const childStages = stage.childNodes?.filter((node) => node.type === "stage") ?? [];
+  const childJobs = stage.childNodes?.filter((node) => node.type === "job") ?? [];
+  const hasChildren = childStages.length > 0 || childJobs.length > 0;
 
   // Filter to root jobs only (no parent)
-  const rootJobs = stage.jobs?.filter((j) => !j.parentJobId) || [];
+  const rootJobs = childJobs;
 
-  const isOpen = useMemo(() => {
-    if (allExpanded) return true;
-    const planOpenStates = openStagesByPlan[planId];
-    return planOpenStates?.[stage.id] ?? true;
-  }, [allExpanded, openStagesByPlan, planId, stage.id]);
-
+  const isOpen = useIsOpen(stage.id);
+  console.log("Rendering StageNode:", { stageId: stage.id, isOpen });
   return (
-    <Collapsible
-      open={isOpen}
-      onOpenChange={(nextOpen) => setStageOpen(planId, stage.id, nextOpen)}
-    >
+    <Collapsible open={isOpen} onOpenChange={() => toggleExpandNode(stage.id)}>
       <ContextMenu>
         <ContextMenuTrigger asChild>
           <div
             className={
               " relative flex items-center gap-2 py-1.5 px-2 rounded-md cursor-pointer group transition-colors"
             }
-            // className={useNodeStyle(planId, stage.id, "stage")}
             style={{ marginLeft: depth * 20 }}
             onPointerDown={(event) => {
-              handlePointerDown(event, planId, stage.id, "stage");
+              handlePointerDown(event, stage.id);
             }}
           >
-            <NodeStyleMarker nodeId={stage.id} planId={planId} type="stage" />
             {/* Expand/Collapse */}
             <CollapsibleTrigger asChild>
               <Button
@@ -140,21 +122,16 @@ export function StageNode({ stage, depth }: StageNodeProps) {
 
             {/* Other Badges */}
             <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-              {stage.dependsOnStages.length > 0 && (
+              {stage.dependencies.includeDependencyIds.length > 0 && (
                 <Badge variant="secondary" className="text-[10px] px-1 py-0">
                   <Link className="h-2.5 w-2.5 mr-0.5" />
-                  {stage.dependsOnStages.length}
+                  {stage.dependencies.includeDependencyIds.length}
                 </Badge>
               )}
               {(stage.contextNodes?.length || 0) > 0 && (
                 <Badge variant="context" className="text-[10px] px-1 py-0">
                   <FileText className="h-2.5 w-2.5 mr-0.5" />
                   {stage.contextNodes?.length}
-                </Badge>
-              )}
-              {(stage.ioEnvelopes?.length || 0) > 0 && (
-                <Badge variant="secondary" className="text-[10px] px-1 py-0">
-                  IO
                 </Badge>
               )}
             </div>
@@ -167,7 +144,7 @@ export function StageNode({ stage, depth }: StageNodeProps) {
       {/* Children */}
       <CollapsibleContent>
         {/* Child Stages */}
-        {stage.childStages?.map((childStage) => (
+        {childStages.map((childStage) => (
           <StageNode key={childStage.id} stage={childStage} depth={depth + 1} />
         ))}
 
@@ -180,9 +157,8 @@ export function StageNode({ stage, depth }: StageNodeProps) {
   );
 }
 
-function StageContextMenu({ stage }: { stage: Stage }) {
+function StageContextMenu({ stage }: { stage: PlanNode }) {
   const plan = usePlanDataStore((s) => s.plan);
-  const planId = plan?.id ?? 0;
   const selectNode = useUIStore((s) => s.selectNode);
 
   const {
@@ -192,14 +168,14 @@ function StageContextMenu({ stage }: { stage: Stage }) {
     duplicateStage,
     createJob,
     createContext,
-  } = usePlanMutations(planId);
+  } = usePlanMutations();
 
   const handleAddChildStage = () => {
-    createStage.mutate({ parentStageId: stage.id, title: "New Stage" });
+    createStage.mutate({ parentStageId: stage.id, title: "New Part" });
   };
 
   const handleAddJob = () => {
-    createJob.mutate({ stageId: stage.id, title: "New Job" });
+    createJob.mutate({ parentStageId: stage.id, title: "New Job" });
   };
 
   const handleAddContext = () => {
@@ -226,7 +202,7 @@ function StageContextMenu({ stage }: { stage: Stage }) {
 
   const handleReplanFromHere = () => {
     console.log("[WS] Replan from stage:", stage.id);
-    if (plan) selectNode({ plan, type: "stage", id: stage.id, mode: "replace" });
+    if (plan) selectNode({ id: stage.id, mode: "focus" });
   };
 
   const handleExecutionModeChange = (mode: "sequential" | "parallel") => {
@@ -237,7 +213,7 @@ function StageContextMenu({ stage }: { stage: Stage }) {
     <ContextMenuContent className="w-52">
       <ContextMenuItem onClick={handleAddChildStage}>
         <Plus className="h-4 w-4 mr-2" />
-        Add Child Stage
+        Add Child Part
       </ContextMenuItem>
       <ContextMenuItem onClick={handleAddJob}>
         <Plus className="h-4 w-4 mr-2" />

@@ -8,6 +8,7 @@ import { getPlans } from "@/actions/plan-actions";
 //http://localhost:3000/plans
 export default async function PlansPage() {
   const plans = await getPlans();
+  
 
   return (
     <div className="min-h-screen bg-background">

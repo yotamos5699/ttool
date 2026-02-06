@@ -1,6 +1,4 @@
 "use client";
-
-import { useMemo } from "react";
 import {
   ChevronRight,
   ChevronDown,
@@ -26,39 +24,28 @@ import {
 } from "@/components/ui/context-menu";
 import { Badge } from "@/components/ui/badge";
 import { InlineText } from "@/components/inline-edit/InlineText";
-import { usePlanDataStore, useUIStore, Job } from "@/stores/plan";
+import { usePlanDataStore, useUIStore, PlanNode } from "@/stores/plan";
 import { usePlanMutations } from "@/hooks/usePlanMutations";
-import { handlePointerDown, useNodeStyle } from "./helper";
-import { NodeStyleMarker } from "./NodeStyleMarker";
+import { handlePointerDown } from "./helper";
+import { toggleExpandNode } from "@/stores/plan/uiStore";
+import { useIsOpen } from "@/hooks/useIsOpen";
 
 type JobNodeProps = {
-  job: Job;
+  job: PlanNode;
   depth: number;
 };
 
 export function JobNode({ job, depth }: JobNodeProps) {
   // Get state from store
 
-  const planId = usePlanDataStore((s) => s.plan?.id ?? 0);
-  const allExpanded = useUIStore((s) => s.allExpanded);
-  const openJobsByPlan = useUIStore((s) => s.openJobsByPlan);
-  const setJobOpen = useUIStore((s) => s.setJobOpen);
+  const { updateJob } = usePlanMutations();
 
-  const { updateJob } = usePlanMutations(planId);
+  const childJobs = job.childNodes?.filter((node) => node.type === "job") ?? [];
+  const hasChildren = childJobs.length > 0;
 
-  const hasChildren = (job.childJobs?.length || 0) > 0;
-
-  const isOpen = useMemo(() => {
-    if (allExpanded) return true;
-    const planOpenStates = openJobsByPlan[planId];
-    return planOpenStates?.[job.id] ?? true;
-  }, [allExpanded, openJobsByPlan, planId, job.id]);
-  // const style = useNodeStyle(planId, job.id, "job");
+  const isOpen = useIsOpen(job.id);
   return (
-    <Collapsible
-      open={isOpen}
-      onOpenChange={(nextOpen) => setJobOpen(planId, job.id, nextOpen)}
-    >
+    <Collapsible open={isOpen} onOpenChange={() => toggleExpandNode(job.id)}>
       <ContextMenu>
         <ContextMenuTrigger asChild>
           <div
@@ -67,10 +54,9 @@ export function JobNode({ job, depth }: JobNodeProps) {
             }
             style={{ marginLeft: depth * 20 }}
             onPointerDown={(event) => {
-              handlePointerDown(event, planId, job.id, "job");
+              handlePointerDown(event, job.id);
             }}
           >
-            <NodeStyleMarker nodeId={job.id} planId={planId} type="job" />
             {/* Expand/Collapse */}
             <CollapsibleTrigger asChild>
               <Button
@@ -103,10 +89,10 @@ export function JobNode({ job, depth }: JobNodeProps) {
 
             {/* Badges */}
             <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-              {job.dependsOnJobs.length > 0 && (
+              {job.dependencies.includeDependencyIds.length > 0 && (
                 <Badge variant="secondary" className="text-[10px] px-1 py-0">
                   <Link className="h-2.5 w-2.5 mr-0.5" />
-                  {job.dependsOnJobs.length}
+                  {job.dependencies.includeDependencyIds.length}
                 </Badge>
               )}
               {(job.contextNodes?.length || 0) > 0 && (
@@ -124,7 +110,7 @@ export function JobNode({ job, depth }: JobNodeProps) {
 
       {/* Child Jobs */}
       <CollapsibleContent>
-        {job.childJobs?.map((childJob) => (
+        {childJobs.map((childJob) => (
           <JobNode key={childJob.id} job={childJob} depth={depth + 1} />
         ))}
       </CollapsibleContent>
@@ -132,16 +118,37 @@ export function JobNode({ job, depth }: JobNodeProps) {
   );
 }
 
-function JobContextMenu({ job }: { job: Job }) {
+function JobContextMenu({ job }: { job: PlanNode }) {
   const plan = usePlanDataStore((s) => s.plan);
-  const planId = plan?.id ?? 0;
   const selectNode = useUIStore((s) => s.selectNode);
+  const parentStage = usePlanDataStore((s) => {
+    const parts = s.plan?.parts ?? [];
+    const findParentStage = (
+      nodes: PlanNode[],
+      targetId: number,
+      stageAncestor: PlanNode | null,
+    ): PlanNode | null => {
+      for (const node of nodes) {
+        const nextStage = node.type === "stage" ? node : stageAncestor;
+        if (node.childNodes?.some((child) => child.id === targetId)) {
+          return nextStage;
+        }
+        if (node.childNodes) {
+          const found = findParentStage(node.childNodes, targetId, nextStage);
+          if (found) return found;
+        }
+      }
+      return null;
+    };
+    return findParentStage(parts, job.id, null);
+  });
 
-  const { createJob, deleteJob, duplicateJob, createContext } = usePlanMutations(planId);
+  const { createJob, deleteJob, duplicateJob, createContext } = usePlanMutations();
 
   const handleAddChildJob = () => {
+    if (!parentStage) return;
     createJob.mutate({
-      stageId: job.stageId,
+      parentStageId: parentStage.id,
       parentJobId: job.id,
       title: "New Sub-Job",
     });
@@ -167,7 +174,7 @@ function JobContextMenu({ job }: { job: Job }) {
 
   const handleReplanFromHere = () => {
     console.log("[WS] Replan from job:", job.id);
-    if (plan) selectNode({ plan, type: "job", id: job.id, mode: "replace" });
+    if (plan) selectNode({ id: job.id, mode: "focus" });
   };
 
   return (
