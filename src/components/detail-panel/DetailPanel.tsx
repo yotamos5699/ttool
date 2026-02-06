@@ -7,9 +7,36 @@ import { ConnectedEdgesPanel } from "./ConnectedEdgesPanel";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { useSelectedNode } from "@/stores/plan/uiStore";
+import { usePlanDataStore } from "@/stores/plan";
+import { useQuery } from "@tanstack/react-query";
+import { getContextSubtree } from "@/actions/context-actions";
 
 export function DetailPanel() {
   const { text, node } = useSelectedNode();
+  const plan = usePlanDataStore((s) => s.plan);
+
+  const contextTargetId =
+    node?.type === "plan" ? (plan?.rootNodeId ?? null) : (node?.id ?? null);
+  const contextLastUpdatedAt =
+    node?.type === "plan" ? plan?.rootNodeLastUpdatedAt : node?.lastUpdatedAt;
+
+  const contextQuery = useQuery({
+    queryKey: ["contextNodes", contextTargetId],
+    queryFn: () =>
+      contextTargetId
+        ? getContextSubtree(contextTargetId, contextLastUpdatedAt ?? new Date(0))
+        : Promise.resolve([]),
+    enabled: Boolean(contextTargetId),
+  });
+
+  const contextNodes = (contextQuery.data ?? []).map((ctx) => ({
+    id: ctx.id,
+    level: "context",
+    type: ctx.contextType,
+    title: ctx.title,
+    payload: ctx.payload,
+    parentId: ctx.parentId ?? null,
+  }));
 
   if (text || !node) {
     return (
@@ -27,8 +54,8 @@ export function DetailPanel() {
           <PlanDetailForm />
           <Separator />
           <ContextNodeList
-            contextNodes={node.contextNodes ?? []}
-            targetId={node.id}
+            contextNodes={contextNodes}
+            targetId={contextTargetId ?? node.id}
             targetType="plan"
           />
         </div>
@@ -47,10 +74,13 @@ export function DetailPanel() {
           <ConnectedEdgesPanel nodeId={node.id} />
           <Separator />
           <ContextNodeList
-            contextNodes={node.contextNodes || []}
+            contextNodes={contextNodes}
             targetId={node.id}
             targetType={node.type}
           />
+          {contextQuery.isLoading && (
+            <div className="text-xs text-muted-foreground">Loading context…</div>
+          )}
         </div>
       </ScrollArea>
     );

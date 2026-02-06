@@ -1,4 +1,4 @@
-# ttool - Deterministic Plan & Context Management System
+<!-- # ttool - Deterministic Plan & Context Management System
 
 Version: 0.2
 Updated: 2026-02-04
@@ -154,4 +154,6 @@ WebSocket messages trigger dispatches for real-time sync across clients.
 3. **Diff View** - Visual comparison for replan changes
 4. **History/Audit** - Track all changes with timestamps
 5. **Permissions** - Role-based access control
-6. **Export/Import** - Plan templates and sharing
+6. **Export/Import** - Plan templates and sharing -->
+
+

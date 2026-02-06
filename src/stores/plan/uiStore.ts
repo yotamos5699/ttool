@@ -1,7 +1,6 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
-import type { Selection, Plan, PlanNode } from "./types";
-import { use } from "react";
+import type { Plan, PlanNode } from "./types";
 import { getNodeById, usePlanDataStore } from "./planDataStore";
 
 /* ----------------------------------
@@ -27,11 +26,28 @@ export const useSelectedNode = ():
   | { text: null; node: PlanNode }
   | { text: string; node: null } => {
   const planId = useUIStore((s) => s.planId);
+  const plan = usePlanDataStore((s) => s.plan);
   const focucedNodeId = useUIStore((s) => s.focucedNodeId)[planId as number];
   if (!planId) return { text: "  Loading...", node: null } as const;
   if (!focucedNodeId)
     return { text: " Select a node from the tree to view details", node: null } as const;
   const node = getNodeById(focucedNodeId);
+  if (!node && plan && focucedNodeId === plan.id) {
+    return {
+      text: null,
+      node: {
+        id: plan.id,
+        type: "plan",
+        title: plan.name,
+        description: plan.goal ?? null,
+        contextNodes: plan.contextNodes ?? [],
+        dataNodeIds: plan.dataNodeIds ?? [],
+        dependencies: plan.dependencies,
+        childNodes: plan.parts,
+        lastUpdatedAt: plan.rootNodeLastUpdatedAt,
+      },
+    } as const;
+  }
   if (!node) return { text: " Node not found", node: null } as const;
 
   return { text: null, node } as const;

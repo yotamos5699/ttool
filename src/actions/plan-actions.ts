@@ -1,11 +1,10 @@
 "use server";
 
 import { db } from "@/dbs/drizzle";
-import { nodes, type Node } from "@/dbs/drizzle/schema";
-import { eq, and } from "drizzle-orm";
+import { nodes, plans, type Node, type PlanSelect } from "@/dbs/drizzle/schema";
+import { eq, and, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { buildPath } from "@/lib/ltree";
-import { plans } from "@/dbs/drizzle/schema/plan-nodes";
 
 /* ----------------------------------
  * Types
@@ -20,7 +19,6 @@ export interface PlanCreateInput {
   disableDependencyInheritance?: boolean;
   includeDependencyIds?: number[];
   excludeDependencyIds?: number[];
-  config?: Record<string, unknown> | null;
 }
 
 export interface PlanUpdateInput {
@@ -32,11 +30,11 @@ export interface PlanUpdateInput {
   disableDependencyInheritance?: boolean;
   includeDependencyIds?: number[];
   excludeDependencyIds?: number[];
-  config?: Record<string, unknown> | null;
 }
 
-export interface PlanWithDetails extends Node {
-  planData: PlanNode | null;
+export interface PlanWithDetails {
+  plan: PlanSelect;
+  rootNode: Node | null;
 }
 
 /* ----------------------------------
@@ -45,47 +43,49 @@ export interface PlanWithDetails extends Node {
  * ---------------------------------- */
 
 export async function createPlan(data: PlanCreateInput): Promise<PlanWithDetails> {
-  // Insert base node with temporary path
-  const [node] = await db
+  const [plan] = await db
+    .insert(plans)
+    .values({
+      name: data.name,
+      goal: data.goal,
+      version: data.version ?? 1,
+      parentVersion: data.parentVersion ?? null,
+      tenantId: data.tenantId,
+      active: true,
+    })
+    .returning();
+
+  const [rootNode] = await db
     .insert(nodes)
     .values({
-      type: "plan",
+      type: "stage",
       name: data.name,
       path: "temp",
       depth: 0,
       parentId: null,
-      planId: null, // Will be set to self
+      planId: plan.id,
       tenantId: data.tenantId,
       disableDependencyInheritance: data.disableDependencyInheritance ?? false,
       includeDependencyIds: data.includeDependencyIds ?? [],
       excludeDependencyIds: data.excludeDependencyIds ?? [],
-      config: data.config ?? null,
     })
     .returning();
 
-  // Update path with actual ID and set planId to self
-  const path = buildPath(null, "plan", node.id);
-  const [updated] = await db
+  const path = buildPath(null, rootNode.type, rootNode.id);
+  const [updatedRoot] = await db
     .update(nodes)
-    .set({ path, planId: node.id })
-    .where(eq(nodes.id, node.id))
+    .set({ path })
+    .where(eq(nodes.id, rootNode.id))
     .returning();
 
-  // Insert plan-specific data
-  const [planData] = await db
-    .insert(plans)
-    .values({
-      // nodeId: node.id,
-
-      active: true,
-      goal: data.goal,
-      version: data.version ?? 1,
-      parentVersion: data.parentVersion ?? null,
-    })
+  const [updatedPlan] = await db
+    .update(plans)
+    .set({ rootNodeId: rootNode.id })
+    .where(eq(plans.id, plan.id))
     .returning();
 
   revalidatePath("/plans");
-  return { ...updated, planData };
+  return { plan: updatedPlan, rootNode: updatedRoot ?? rootNode };
 }
 
 /* ----------------------------------
@@ -93,17 +93,19 @@ export async function createPlan(data: PlanCreateInput): Promise<PlanWithDetails
  * ---------------------------------- */
 
 export async function getPlan(id: number): Promise<PlanWithDetails | null> {
-  const node = await db.query.nodes.findFirst({
-    where: and(eq(nodes.id, id), eq(nodes.type, "plan")),
+  const plan = await db.query.plans.findFirst({
+    where: eq(plans.id, id),
   });
 
-  if (!node) return null;
+  if (!plan) return null;
 
-  const planData = await db.query.pl.findFirst({
-    where: eq(planNodes.nodeId, id),
-  });
+  const rootNode = plan.rootNodeId
+    ? await db.query.nodes.findFirst({
+        where: eq(nodes.id, plan.rootNodeId),
+      })
+    : null;
 
-  return { ...node, planData: planData ?? null };
+  return { plan, rootNode: rootNode ?? null };
 }
 
 /* ----------------------------------
@@ -114,40 +116,32 @@ export async function getPlans(options?: {
   tenantId?: number;
   activeOnly?: boolean;
 }): Promise<PlanWithDetails[]> {
-  const conditions = [eq(nodes.type, "plan")];
+  const conditions = [] as ReturnType<typeof and>[];
 
-  // If tenantId provided, filter by it
   if (options?.tenantId) {
-    conditions.push(eq(nodes.tenantId, options.tenantId));
+    conditions.push(eq(plans.tenantId, options.tenantId));
   }
 
   if (options?.activeOnly) {
-    conditions.push(eq(nodes.active, true));
+    conditions.push(eq(plans.active, true));
   }
 
-  const planNodesResult = await db.query.nodes.findMany({
-    where: and(...conditions),
-    orderBy: (n, { desc }) => [desc(n.createdAt)],
+  const planList = await db.query.plans.findMany({
+    where: conditions.length > 0 ? and(...conditions) : undefined,
+    orderBy: (p, { desc }) => [desc(p.createdAt)],
   });
 
-  // Fetch plan-specific data for all plans
-  const planDataMap = new Map<number, PlanNode>();
-  if (planNodesResult.length > 0) {
-    const planIds = planNodesResult.map((n) => n.id);
-    const planDataList = await db.query.planNodes.findMany({
-      // Note: Drizzle doesn't have built-in inArray for query API
-      // We'll filter manually for now
-    });
-    for (const pd of planDataList) {
-      if (planIds.includes(pd.nodeId)) {
-        planDataMap.set(pd.nodeId, pd);
-      }
-    }
-  }
-  console.log("Fetched plans:", { count: planNodesResult.length });
-  return planNodesResult.map((n) => ({
-    ...n,
-    planData: planDataMap.get(n.id) ?? null,
+  const rootIds = planList.map((p) => p.rootNodeId).filter(Boolean) as number[];
+  const rootNodes = rootIds.length
+    ? await db.query.nodes.findMany({
+        where: inArray(nodes.id, rootIds),
+      })
+    : [];
+  const rootMap = new Map(rootNodes.map((node) => [node.id, node]));
+
+  return planList.map((plan) => ({
+    plan,
+    rootNode: plan.rootNodeId ? (rootMap.get(plan.rootNodeId) ?? null) : null,
   }));
 }
 
@@ -162,45 +156,45 @@ export async function updatePlan(
   const existing = await getPlan(id);
   if (!existing) return null;
 
-  // Update base node
-  const nodeUpdates: Partial<Node> = { updatedAt: new Date() };
-  if (data.name !== undefined) nodeUpdates.name = data.name;
-  if (data.active !== undefined) nodeUpdates.active = data.active;
-  if (data.isFrozen !== undefined) nodeUpdates.isFrozen = data.isFrozen;
-  if (data.disableDependencyInheritance !== undefined) {
-    nodeUpdates.disableDependencyInheritance = data.disableDependencyInheritance;
-  }
-  if (data.includeDependencyIds !== undefined) {
-    nodeUpdates.includeDependencyIds = data.includeDependencyIds;
-  }
-  if (data.excludeDependencyIds !== undefined) {
-    nodeUpdates.excludeDependencyIds = data.excludeDependencyIds;
-  }
-  if (data.config !== undefined) nodeUpdates.config = data.config;
-
-  const [updatedNode] = await db
-    .update(nodes)
-    .set(nodeUpdates)
-    .where(eq(nodes.id, id))
-    .returning();
-
-  // Update plan-specific data
-  const planUpdates: Partial<PlanNode> = {};
+  const planUpdates: Partial<PlanSelect> = { updatedAt: new Date() };
+  if (data.name !== undefined) planUpdates.name = data.name;
   if (data.goal !== undefined) planUpdates.goal = data.goal;
   if (data.version !== undefined) planUpdates.version = data.version;
+  if (data.active !== undefined) planUpdates.active = data.active;
 
-  let planData = existing.planData;
-  if (Object.keys(planUpdates).length > 0) {
-    const [updated] = await db
-      .update(planNodes)
-      .set(planUpdates)
-      .where(eq(planNodes.nodeId, id))
-      .returning();
-    planData = updated;
+  const [updatedPlan] = await db
+    .update(plans)
+    .set(planUpdates)
+    .where(eq(plans.id, id))
+    .returning();
+
+  let updatedRoot = existing.rootNode;
+  if (existing.rootNode) {
+    const nodeUpdates: Partial<Node> = { updatedAt: new Date() };
+    if (data.name !== undefined) nodeUpdates.name = data.name;
+    if (data.isFrozen !== undefined) nodeUpdates.isFrozen = data.isFrozen;
+    if (data.disableDependencyInheritance !== undefined) {
+      nodeUpdates.disableDependencyInheritance = data.disableDependencyInheritance;
+    }
+    if (data.includeDependencyIds !== undefined) {
+      nodeUpdates.includeDependencyIds = data.includeDependencyIds;
+    }
+    if (data.excludeDependencyIds !== undefined) {
+      nodeUpdates.excludeDependencyIds = data.excludeDependencyIds;
+    }
+
+    if (Object.keys(nodeUpdates).length > 1) {
+      const [updatedNode] = await db
+        .update(nodes)
+        .set(nodeUpdates)
+        .where(eq(nodes.id, existing.rootNode.id))
+        .returning();
+      updatedRoot = updatedNode;
+    }
   }
 
   revalidatePath("/plans");
-  return { ...updatedNode, planData };
+  return { plan: updatedPlan, rootNode: updatedRoot ?? null };
 }
 
 /* ----------------------------------
@@ -212,7 +206,7 @@ export async function deletePlan(id: number): Promise<boolean> {
   const existing = await getPlan(id);
   if (!existing) return false;
 
-  await db.delete(nodes).where(eq(nodes.id, id));
+  await db.delete(plans).where(eq(plans.id, id));
   revalidatePath("/plans");
   return true;
 }
@@ -227,14 +221,14 @@ export async function forkPlan(
   options?: { name?: string; tenantId?: number },
 ): Promise<PlanWithDetails | null> {
   const original = await getPlan(planId);
-  if (!original || !original.planData) return null;
+  if (!original) return null;
 
   const newPlan = await createPlan({
-    name: options?.name ?? `${original.name} (Fork)`,
-    goal: original.planData.goal,
-    tenantId: options?.tenantId ?? original.tenantId,
-    version: original.planData.version + 1,
-    parentVersion: original.planData.version,
+    name: options?.name ?? `${original.plan.name} (Fork)`,
+    goal: original.plan.goal,
+    tenantId: options?.tenantId ?? original.plan.tenantId,
+    version: original.plan.version + 1,
+    parentVersion: original.plan.version,
   });
 
   // TODO: Deep copy all child nodes (parts, jobs, context, data)

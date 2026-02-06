@@ -8,6 +8,7 @@ export type ContextNode = {
   type: string;
   title: string;
   payload: string;
+  parentId?: number | null;
 };
 
 export type PlanNodeType = "stage" | "job" | "context" | "data" | "plan";
@@ -22,14 +23,18 @@ export type PlanNode = {
   dataNodeIds: number[];
   dependencies: NodeDependencies;
   childNodes?: PlanNode[];
+  lastUpdatedAt?: Date;
 };
 
 export type Plan = {
   id: number;
+  tenantId?: number;
   name: string;
   goal: string;
   version: number;
   parentVersion: number | null;
+  rootNodeId?: number | null;
+  rootNodeLastUpdatedAt?: Date;
   parts: PlanNode[];
   contextNodes: ContextNode[];
   dependencies: NodeDependencies;

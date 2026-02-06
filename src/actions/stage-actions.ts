@@ -1,14 +1,8 @@
 "use server";
 
 import { db } from "@/dbs/drizzle";
-import {
-  nodes,
-  stageNodes,
-  type Node,
-  type StageNode,
-  type ExecutionMode,
-} from "@/dbs/drizzle/schema";
-import { eq, and, inArray } from "drizzle-orm";
+import { nodes, type Node, type ExecutionMode } from "@/dbs/drizzle/schema";
+import { eq, and } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { buildPath, getPathDepth } from "@/lib/ltree";
 
@@ -26,7 +20,6 @@ export interface StageCreateInput {
   disableDependencyInheritance?: boolean;
   includeDependencyIds?: number[];
   excludeDependencyIds?: number[];
-  config?: Record<string, unknown> | null;
 }
 
 export interface StageUpdateInput {
@@ -38,12 +31,9 @@ export interface StageUpdateInput {
   disableDependencyInheritance?: boolean;
   includeDependencyIds?: number[];
   excludeDependencyIds?: number[];
-  config?: Record<string, unknown> | null;
 }
 
-export interface StageWithDetails extends Node {
-  stageData: StageNode | null;
-}
+export type StageWithDetails = Node;
 
 /* ----------------------------------
  * Create Stage
@@ -70,7 +60,8 @@ export async function createStage(data: StageCreateInput): Promise<StageWithDeta
       disableDependencyInheritance: data.disableDependencyInheritance ?? false,
       includeDependencyIds: data.includeDependencyIds ?? [],
       excludeDependencyIds: data.excludeDependencyIds ?? [],
-      config: data.config ?? null,
+      description: data.description ?? null,
+      executionMode: data.executionMode ?? "sequential",
     })
     .returning();
 
@@ -84,18 +75,8 @@ export async function createStage(data: StageCreateInput): Promise<StageWithDeta
     .where(eq(nodes.id, node.id))
     .returning();
 
-  // Insert stage-specific data
-  const [stageData] = await db
-    .insert(stageNodes)
-    .values({
-      nodeId: node.id,
-      description: data.description ?? null,
-      executionMode: data.executionMode ?? "sequential",
-    })
-    .returning();
-
   revalidatePath("/plans");
-  return { ...updated, stageData };
+  return updated;
 }
 
 /* ----------------------------------
@@ -108,12 +89,7 @@ export async function getStage(id: number): Promise<StageWithDetails | null> {
   });
 
   if (!node) return null;
-
-  const stageData = await db.query.stageNodes.findFirst({
-    where: eq(stageNodes.nodeId, id),
-  });
-
-  return { ...node, stageData: stageData ?? null };
+  return node;
 }
 
 /* ----------------------------------
@@ -135,23 +111,7 @@ export async function getStagesForPlan(
     orderBy: (n, { asc }) => [asc(n.path)],
   });
 
-  if (stageNodesList.length === 0) return [];
-
-  // Batch fetch stage data
-  const stageIds = stageNodesList.map((n) => n.id);
-  const stageDataList = await db.query.stageNodes.findMany({
-    where: inArray(stageNodes.nodeId, stageIds),
-  });
-
-  const stageDataMap = new Map<number, StageNode>();
-  for (const sd of stageDataList) {
-    stageDataMap.set(sd.nodeId, sd);
-  }
-
-  return stageNodesList.map((n) => ({
-    ...n,
-    stageData: stageDataMap.get(n.id) ?? null,
-  }));
+  return stageNodesList;
 }
 
 /* ----------------------------------
@@ -179,7 +139,8 @@ export async function updateStage(
   if (data.excludeDependencyIds !== undefined) {
     nodeUpdates.excludeDependencyIds = data.excludeDependencyIds;
   }
-  if (data.config !== undefined) nodeUpdates.config = data.config;
+  if (data.description !== undefined) nodeUpdates.description = data.description;
+  if (data.executionMode !== undefined) nodeUpdates.executionMode = data.executionMode;
 
   const [updatedNode] = await db
     .update(nodes)
@@ -187,23 +148,8 @@ export async function updateStage(
     .where(eq(nodes.id, id))
     .returning();
 
-  // Update stage-specific data
-  const stageUpdates: Partial<StageNode> = {};
-  if (data.description !== undefined) stageUpdates.description = data.description;
-  if (data.executionMode !== undefined) stageUpdates.executionMode = data.executionMode;
-
-  let stageData = existing.stageData;
-  if (Object.keys(stageUpdates).length > 0) {
-    const [updated] = await db
-      .update(stageNodes)
-      .set(stageUpdates)
-      .where(eq(stageNodes.nodeId, id))
-      .returning();
-    stageData = updated;
-  }
-
   revalidatePath("/plans");
-  return { ...updatedNode, stageData };
+  return updatedNode;
 }
 
 /* ----------------------------------
@@ -238,20 +184,5 @@ export async function getChildStages(
     orderBy: (n, { asc }) => [asc(n.path)],
   });
 
-  if (stageNodesList.length === 0) return [];
-
-  const stageIds = stageNodesList.map((n) => n.id);
-  const stageDataList = await db.query.stageNodes.findMany({
-    where: inArray(stageNodes.nodeId, stageIds),
-  });
-
-  const stageDataMap = new Map<number, StageNode>();
-  for (const sd of stageDataList) {
-    stageDataMap.set(sd.nodeId, sd);
-  }
-
-  return stageNodesList.map((n) => ({
-    ...n,
-    stageData: stageDataMap.get(n.id) ?? null,
-  }));
+  return stageNodesList;
 }

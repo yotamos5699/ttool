@@ -159,7 +159,7 @@ function JobContextMenu({ job }: { job: PlanNode }) {
       targetType: "job",
       targetId: job.id,
       title: "New Context",
-      type: "note",
+      type: "rule",
     });
   };
 

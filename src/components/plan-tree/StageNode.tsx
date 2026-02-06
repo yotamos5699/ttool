@@ -47,8 +47,6 @@ type StageNodeProps = {
 export function StageNode({ stage, depth }: StageNodeProps) {
   // Get state from store
 
-  const planId = usePlanDataStore((s) => s.plan?.id ?? 0);
-
   const { updateStage } = usePlanMutations();
 
   const childStages = stage.childNodes?.filter((node) => node.type === "stage") ?? [];
@@ -183,7 +181,7 @@ function StageContextMenu({ stage }: { stage: PlanNode }) {
       targetType: "stage",
       targetId: stage.id,
       title: "New Context",
-      type: "note",
+      type: "rule",
     });
   };
 

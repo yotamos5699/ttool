@@ -3,12 +3,9 @@
 import { db } from "@/dbs/drizzle";
 import {
   nodes,
-  planNodes,
-  stageNodes,
-  jobNodes,
-  contextNodes,
   dataNodes,
   planEdges,
+  plans,
   type Node,
   type NodeType,
 } from "@/dbs/drizzle/schema";
@@ -167,24 +164,19 @@ export async function getContextAndDataInSubtree(
  * ---------------------------------- */
 
 export async function getPlanTree(planId: number): Promise<{
-  plan: Node | undefined;
+  plan: typeof plans.$inferSelect | undefined;
   nodes: Node[];
 }> {
-  const plan = await db.query.nodes.findFirst({
-    where: and(eq(nodes.id, planId), eq(nodes.type, "plan")),
-  with:{plan:true,jobNode:true,stageNode:true}});
+  const plan = await db.query.plans.findFirst({
+    where: eq(plans.id, planId),
+  });
 
-  
   if (!plan) {
     return { plan: undefined, nodes: [] };
   }
 
   const allNodes = await db.query.nodes.findMany({
-    where: and(
-      eq(nodes.planId, planId),
-      eq(nodes.active, true),
-      sql`${nodes.path}::ltree <@ ${plan.path}::ltree`,
-    ),
+    where: and(eq(nodes.planId, planId), eq(nodes.active, true)),
     orderBy: (n, { asc }) => [asc(n.depth), asc(n.path)],
   });
 
@@ -203,24 +195,9 @@ export async function getPlanForStore(planId: number): Promise<Plan | null> {
     return null;
   }
 
-  // Get plan-specific data
-  const planData = await db.query.planNodes.findFirst({
-    where: eq(planNodes.nodeId, planId),
-  });
-
   const nodeIds = allNodes.map((node) => node.id);
-
   const nodeIdList = nodeIds.length > 0 ? nodeIds : [-1];
 
-  const stageDataList = await db.query.stageNodes.findMany({
-    where: inArray(stageNodes.nodeId, nodeIdList),
-  });
-  const jobDataList = await db.query.jobNodes.findMany({
-    where: inArray(jobNodes.nodeId, nodeIdList),
-  });
-  const contextDataList = await db.query.contextNodes.findMany({
-    where: inArray(contextNodes.nodeId, nodeIdList),
-  });
   const dataDataList = await db.query.dataNodes.findMany({
     where: inArray(dataNodes.nodeId, nodeIdList),
   });
@@ -231,18 +208,12 @@ export async function getPlanForStore(planId: number): Promise<Plan | null> {
     ),
   });
 
-  const stageDataByNodeId = new Map(stageDataList.map((row) => [row.nodeId, row]));
-  const jobDataByNodeId = new Map(jobDataList.map((row) => [row.nodeId, row]));
-  const contextDataByNodeId = new Map(contextDataList.map((row) => [row.nodeId, row]));
   const dataDataByNodeId = new Map(dataDataList.map((row) => [row.nodeId, row]));
 
   return nodesToPlan({
-    planNode: plan,
+    plan,
     nodes: allNodes,
-    planData: planData ?? undefined,
-    contextDataByNodeId,
-    stageDataByNodeId,
-    jobDataByNodeId,
+    contextNodes: [],
     dataDataByNodeId,
     planEdges: planEdgeList,
   });

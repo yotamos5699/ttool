@@ -1,12 +1,7 @@
 "use client";
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import {
-  usePlanDataStore,
-  type Plan,
-  type PlanNode,
-  type ContextNode,
-} from "@/stores/plan";
+import { usePlanDataStore, type Plan, type PlanNode } from "@/stores/plan";
 
 // Server actions - New node-based action files
 import { updatePlan as updatePlanAction } from "@/actions/plan-actions";
@@ -32,7 +27,7 @@ import {
   type ContextCreateInput,
   type ContextUpdateInput,
 } from "@/actions/context-actions";
-import type { ContextType } from "@/dbs/drizzle/schema";
+import type { ContextType, ContextNode as DbContextNode } from "@/dbs/drizzle/schema";
 
 /**
  * Hook providing all plan mutations with optimistic updates
@@ -80,12 +75,13 @@ export function usePlanMutations() {
   const createStage = useMutation({
     mutationFn: (data: { parentStageId?: number | null; title: string }) => {
       if (!plan) throw new Error("No plan loaded");
+      if (!plan.rootNodeId) throw new Error("Plan root node not set");
 
       const input: StageCreateInput = {
         name: data.title,
         planId,
-        parentId: data.parentStageId ?? planId, // If no parent stage, parent is the plan
-        tenantId: plan.id, // Using plan id as tenant for now - should get from context
+        parentId: data.parentStageId ?? plan.rootNodeId, // If no parent stage, parent is root
+        tenantId: plan.tenantId ?? plan.id,
         executionMode: "sequential",
         disableDependencyInheritance: false,
         includeDependencyIds: [],
@@ -189,7 +185,7 @@ export function usePlanMutations() {
         name: `${stageToDuplicate.title} (copy)`,
         planId,
         parentId: stageToDuplicate.id,
-        tenantId: plan.id,
+        tenantId: plan.tenantId ?? plan.id,
         executionMode: stageToDuplicate.executionMode,
         description: stageToDuplicate.description ?? undefined,
         disableDependencyInheritance:
@@ -224,7 +220,7 @@ export function usePlanMutations() {
         name: data.title,
         planId,
         parentId: data.parentJobId ?? data.parentStageId, // If no parent job, parent is the stage
-        tenantId: plan.id, // Using plan id as tenant for now
+        tenantId: plan.tenantId ?? plan.id,
         disableDependencyInheritance: false,
         includeDependencyIds: [],
         excludeDependencyIds: [],
@@ -322,7 +318,7 @@ export function usePlanMutations() {
         name: `${jobToDuplicate.title} (copy)`,
         planId,
         parentId: jobToDuplicate.id,
-        tenantId: plan.id,
+        tenantId: plan.tenantId ?? plan.id,
         description: jobToDuplicate.description ?? undefined,
         disableDependencyInheritance:
           jobToDuplicate.dependencies.disableDependencyInheritance,
@@ -352,51 +348,56 @@ export function usePlanMutations() {
     }) => {
       if (!plan) throw new Error("No plan loaded");
 
+      const nodeId = data.targetType === "plan" ? (plan.rootNodeId ?? 0) : data.targetId;
+      if (!nodeId) throw new Error("Target node not resolved");
+
       const input: ContextCreateInput = {
-        name: data.title,
+        nodeId,
+        parentId: null,
+        title: data.title,
         contextType: data.type,
         payload: data.payload || "",
-        planId,
-        parentId: data.targetId,
-        tenantId: plan.id, // Using plan id as tenant for now
       };
       return createContextAction(input);
     },
     onMutate: (data) => {
-      const tempContext: ContextNode = {
-        id: -Date.now(),
-        level: data.targetType,
-        type: data.type,
-        title: data.title,
-        payload: data.payload || "",
-      };
-      store.addContext(tempContext, data.targetType, data.targetId);
-      return {
-        tempId: tempContext.id,
-        targetType: data.targetType,
-        targetId: data.targetId,
-      };
+      if (!plan) return {};
+      const nodeId = data.targetType === "plan" ? (plan.rootNodeId ?? 0) : data.targetId;
+      const tempId = -Date.now();
+
+      queryClient.setQueryData(
+        ["contextNodes", nodeId],
+        (previous: DbContextNode[] | undefined) => [
+          ...(previous ?? []),
+          {
+            nodeId,
+            parentId: null,
+            title: data.title,
+            contextType: data.type,
+            payload: data.payload || "",
+            id: tempId,
+          } as DbContextNode,
+        ],
+      );
+
+      return { tempId, nodeId };
     },
-    onSuccess: (newContext, _data, context) => {
-      if (context?.tempId && newContext) {
-        store.deleteContext(context.tempId);
-        const ctx: ContextNode = {
-          id: newContext.id,
-          level: context.targetType,
-          type: newContext.contextData?.contextType ?? "note",
-          title: newContext.name,
-          payload: newContext.contextData?.payload ?? "",
-        };
-        store.addContext(ctx, context.targetType, context.targetId);
-      }
+    onSuccess: (_newContext, _data, context) => {
+      queryClient.invalidateQueries({ queryKey: ["contextNodes"] });
     },
     onError: (_err, _data, context) => {
-      if (context?.tempId) {
-        store.deleteContext(context.tempId);
+      if (context?.nodeId && context.tempId) {
+        queryClient.setQueryData(["contextNodes", context.nodeId], (previous) =>
+          Array.isArray(previous)
+            ? previous.filter((item: { id?: number }) => item.id !== context.tempId)
+            : previous,
+        );
       }
       console.error("Failed to create context");
     },
-    onSettled: invalidatePlan,
+    onSettled: () => {
+      invalidatePlan();
+    },
   });
 
   const updateContext = useMutation({
@@ -408,39 +409,42 @@ export function usePlanMutations() {
       data: { title?: string; type?: ContextType; payload?: string };
     }) => {
       const updateData: ContextUpdateInput = {};
-      if (data.title !== undefined) updateData.name = data.title;
+      if (data.title !== undefined) updateData.title = data.title;
       if (data.type !== undefined) updateData.contextType = data.type;
       if (data.payload !== undefined) updateData.payload = data.payload;
       return updateContextAction(id, updateData);
     },
     onMutate: ({ id, data }) => {
-      const previous = store.plan;
-      store.updateContext(id, data);
+      const previous = plan;
+      void id;
+      void data;
       return { previous };
     },
     onError: (_err, _data, context) => {
-      if (context?.previous) {
-        store.setPlan(context.previous);
-      }
+      queryClient.invalidateQueries({ queryKey: ["contextNodes"] });
       console.error("Failed to update context");
     },
-    onSettled: invalidatePlan,
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["contextNodes"] });
+      invalidatePlan();
+    },
   });
 
   const deleteContext = useMutation({
     mutationFn: (id: number) => deleteContextAction(id),
     onMutate: (id) => {
-      const previous = store.plan;
-      store.deleteContext(id);
-      return { previous };
+      const previous = plan;
+      return { previous, id };
     },
     onError: (_err, _data, context) => {
-      if (context?.previous) {
-        store.setPlan(context.previous);
-      }
+      void context;
+      queryClient.invalidateQueries({ queryKey: ["contextNodes"] });
       console.error("Failed to delete context");
     },
-    onSettled: invalidatePlan,
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["contextNodes"] });
+      invalidatePlan();
+    },
   });
 
   return {

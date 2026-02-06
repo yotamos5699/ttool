@@ -19,7 +19,6 @@ export type NodeCreateInput = {
   disableDependencyInheritance?: boolean;
   includeDependencyIds?: number[];
   excludeDependencyIds?: number[];
-  config?: Record<string, unknown> | null;
 };
 
 export type NodeUpdateInput = Partial<{
@@ -29,7 +28,6 @@ export type NodeUpdateInput = Partial<{
   disableDependencyInheritance: boolean;
   includeDependencyIds: number[];
   excludeDependencyIds: number[];
-  config: Record<string, unknown> | null;
 }>;
 
 /* ----------------------------------
@@ -47,9 +45,6 @@ export async function createNode(data: NodeCreateInput): Promise<Node> {
     parentPath = parent.path;
   }
 
-  // For plans, the planId will be self-referencing (set after insert)
-  const isPlan = data.type === "plan";
-
   // Insert with temporary path (will update after getting ID)
   const [node] = await db
     .insert(nodes)
@@ -59,12 +54,11 @@ export async function createNode(data: NodeCreateInput): Promise<Node> {
       path: "temp", // Will be updated
       depth: 0, // Will be updated
       parentId: data.parentId || null,
-      planId: isPlan ? null : data.planId, // Plans set this to themselves
+      planId: data.planId,
       tenantId: data.tenantId,
       disableDependencyInheritance: data.disableDependencyInheritance ?? false,
       includeDependencyIds: data.includeDependencyIds ?? [],
       excludeDependencyIds: data.excludeDependencyIds ?? [],
-      config: data.config ?? null,
     })
     .returning();
 
@@ -77,7 +71,7 @@ export async function createNode(data: NodeCreateInput): Promise<Node> {
     .set({
       path,
       depth,
-      planId: isPlan ? node.id : data.planId,
+      planId: data.planId,
     })
     .where(eq(nodes.id, node.id))
     .returning();

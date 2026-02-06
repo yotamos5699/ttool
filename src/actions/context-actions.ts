@@ -1,88 +1,98 @@
 "use server";
 
+import { cache } from "react";
 import { db } from "@/dbs/drizzle";
 import {
   nodes,
   contextNodes,
-  type Node,
   type ContextNode,
   type ContextType,
 } from "@/dbs/drizzle/schema";
-import { eq, and, inArray } from "drizzle-orm";
+import { eq, and, inArray, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { buildPath, getPathDepth } from "@/lib/ltree";
 
 /* ----------------------------------
  * Types
  * ---------------------------------- */
 
 export interface ContextCreateInput {
-  name: string;
+  nodeId: number;
+  parentId?: number | null;
+  title: string;
   contextType: ContextType;
   payload: string;
-  planId: number;
-  parentId: number; // Parent node (plan, stage, or job)
-  tenantId: number;
 }
 
 export interface ContextUpdateInput {
-  name?: string;
+  title?: string;
   contextType?: ContextType;
   payload?: string;
-  active?: boolean;
+  parentId?: number | null;
 }
 
-export interface ContextWithDetails extends Node {
-  contextData: ContextNode | null;
+export type ContextWithDetails = ContextNode;
+
+const contextStatsOrder: ContextType[] = ["rule", "skill", "input", "output"];
+
+const getContextSubtreeCached = cache(
+  async (nodeId: number, lastUpdatedAtIso: string): Promise<ContextNode[]> => {
+    void lastUpdatedAtIso;
+    return db.query.contextNodes.findMany({
+      where: eq(contextNodes.nodeId, nodeId),
+      orderBy: (c, { asc }) => [asc(c.parentId), asc(c.id)],
+    });
+  },
+);
+
+async function updateNodeContextMetadata(nodeId: number): Promise<void> {
+  const rows = await db
+    .select({
+      contextType: contextNodes.contextType,
+      count: sql<number>`count(*)`,
+    })
+    .from(contextNodes)
+    .where(eq(contextNodes.nodeId, nodeId))
+    .groupBy(contextNodes.contextType);
+
+  const counts = new Map<ContextType, number>();
+  for (const row of rows) {
+    counts.set(row.contextType, Number(row.count));
+  }
+
+  const summary = contextStatsOrder
+    .map((type) => `${type}:${counts.get(type) ?? 0}`)
+    .join("|");
+
+  await db
+    .update(nodes)
+    .set({
+      contextStats: summary,
+      lastUpdatedAt: new Date(),
+    })
+    .where(eq(nodes.id, nodeId));
 }
 
 /* ----------------------------------
  * Create Context Node
  * ---------------------------------- */
 
-export async function createContext(data: ContextCreateInput): Promise<ContextWithDetails> {
-  // Get parent node for path construction
-  const parent = await db.query.nodes.findFirst({
-    where: eq(nodes.id, data.parentId),
-  });
-  if (!parent) throw new Error("Parent node not found");
-
-  // Insert base node
-  const [node] = await db
-    .insert(nodes)
-    .values({
-      type: "context",
-      name: data.name,
-      path: "temp",
-      depth: 0,
-      parentId: data.parentId,
-      planId: data.planId,
-      tenantId: data.tenantId,
-    })
-    .returning();
-
-  // Update path with actual ID
-  const path = buildPath(parent.path, "context", node.id);
-  const depth = getPathDepth(path);
-
-  const [updated] = await db
-    .update(nodes)
-    .set({ path, depth })
-    .where(eq(nodes.id, node.id))
-    .returning();
-
-  // Insert context-specific data
+export async function createContext(
+  data: ContextCreateInput,
+): Promise<ContextWithDetails> {
   const [contextData] = await db
     .insert(contextNodes)
     .values({
-      nodeId: node.id,
+      nodeId: data.nodeId,
+      parentId: data.parentId ?? null,
       contextType: data.contextType,
+      title: data.title,
       payload: data.payload,
     })
     .returning();
 
+  await updateNodeContextMetadata(data.nodeId);
   revalidatePath("/plans");
-  return { ...updated, contextData };
+  return contextData;
 }
 
 /* ----------------------------------
@@ -90,62 +100,31 @@ export async function createContext(data: ContextCreateInput): Promise<ContextWi
  * ---------------------------------- */
 
 export async function getContext(id: number): Promise<ContextWithDetails | null> {
-  const node = await db.query.nodes.findFirst({
-    where: and(eq(nodes.id, id), eq(nodes.type, "context")),
-  });
-
-  if (!node) return null;
-
   const contextData = await db.query.contextNodes.findFirst({
-    where: eq(contextNodes.nodeId, id),
+    where: eq(contextNodes.id, id),
   });
 
-  return { ...node, contextData: contextData ?? null };
+  return contextData ?? null;
 }
 
 /* ----------------------------------
  * Get Context Nodes for Parent
  * ---------------------------------- */
 
-export async function getContextForParent(
-  parentId: number,
-  options?: { activeOnly?: boolean; contextType?: ContextType }
+export async function getContextForNode(
+  nodeId: number,
+  options?: { contextType?: ContextType },
 ): Promise<ContextWithDetails[]> {
-  const conditions = [eq(nodes.parentId, parentId), eq(nodes.type, "context")];
+  const conditions = [eq(contextNodes.nodeId, nodeId)];
 
-  if (options?.activeOnly) {
-    conditions.push(eq(nodes.active, true));
-  }
-
-  const contextNodesList = await db.query.nodes.findMany({
-    where: and(...conditions),
-    orderBy: (n, { asc }) => [asc(n.path)],
-  });
-
-  if (contextNodesList.length === 0) return [];
-
-  // Batch fetch context data
-  const contextIds = contextNodesList.map((n) => n.id);
-  const contextDataList = await db.query.contextNodes.findMany({
-    where: inArray(contextNodes.nodeId, contextIds),
-  });
-
-  const contextDataMap = new Map<number, ContextNode>();
-  for (const cd of contextDataList) {
-    contextDataMap.set(cd.nodeId, cd);
-  }
-
-  let result = contextNodesList.map((n) => ({
-    ...n,
-    contextData: contextDataMap.get(n.id) ?? null,
-  }));
-
-  // Filter by context type if specified
   if (options?.contextType) {
-    result = result.filter((c) => c.contextData?.contextType === options.contextType);
+    conditions.push(eq(contextNodes.contextType, options.contextType));
   }
 
-  return result;
+  return db.query.contextNodes.findMany({
+    where: and(...conditions),
+    orderBy: (c, { asc }) => [asc(c.parentId), asc(c.id)],
+  });
 }
 
 /* ----------------------------------
@@ -153,42 +132,32 @@ export async function getContextForParent(
  * ---------------------------------- */
 
 export async function getContextForPlan(
-  planId: number,
-  options?: { activeOnly?: boolean; contextType?: ContextType }
+  nodeIds: number[],
+  options?: { contextType?: ContextType },
 ): Promise<ContextWithDetails[]> {
-  const conditions = [eq(nodes.planId, planId), eq(nodes.type, "context")];
+  if (nodeIds.length === 0) return [];
 
-  if (options?.activeOnly) {
-    conditions.push(eq(nodes.active, true));
-  }
-
-  const contextNodesList = await db.query.nodes.findMany({
-    where: and(...conditions),
-    orderBy: (n, { asc }) => [asc(n.path)],
-  });
-
-  if (contextNodesList.length === 0) return [];
-
-  const contextIds = contextNodesList.map((n) => n.id);
-  const contextDataList = await db.query.contextNodes.findMany({
-    where: inArray(contextNodes.nodeId, contextIds),
-  });
-
-  const contextDataMap = new Map<number, ContextNode>();
-  for (const cd of contextDataList) {
-    contextDataMap.set(cd.nodeId, cd);
-  }
-
-  let result = contextNodesList.map((n) => ({
-    ...n,
-    contextData: contextDataMap.get(n.id) ?? null,
-  }));
+  const conditions = [inArray(contextNodes.nodeId, nodeIds)];
 
   if (options?.contextType) {
-    result = result.filter((c) => c.contextData?.contextType === options.contextType);
+    conditions.push(eq(contextNodes.contextType, options.contextType));
   }
 
-  return result;
+  return db.query.contextNodes.findMany({
+    where: and(...conditions),
+    orderBy: (c, { asc }) => [asc(c.nodeId), asc(c.parentId), asc(c.id)],
+  });
+}
+
+export async function getContextSubtree(
+  nodeId: number,
+  lastUpdatedAt: Date | string,
+): Promise<ContextWithDetails[]> {
+  const lastUpdatedAtIso =
+    typeof lastUpdatedAt === "string"
+      ? new Date(lastUpdatedAt).toISOString()
+      : lastUpdatedAt.toISOString();
+  return getContextSubtreeCached(nodeId, lastUpdatedAtIso);
 }
 
 /* ----------------------------------
@@ -197,39 +166,30 @@ export async function getContextForPlan(
 
 export async function updateContext(
   id: number,
-  data: ContextUpdateInput
+  data: ContextUpdateInput,
 ): Promise<ContextWithDetails | null> {
   const existing = await getContext(id);
   if (!existing) return null;
 
-  // Update base node
-  const nodeUpdates: Partial<Node> = { updatedAt: new Date() };
-  if (data.name !== undefined) nodeUpdates.name = data.name;
-  if (data.active !== undefined) nodeUpdates.active = data.active;
-
-  const [updatedNode] = await db
-    .update(nodes)
-    .set(nodeUpdates)
-    .where(eq(nodes.id, id))
-    .returning();
-
-  // Update context-specific data
   const contextUpdates: Partial<ContextNode> = {};
   if (data.contextType !== undefined) contextUpdates.contextType = data.contextType;
   if (data.payload !== undefined) contextUpdates.payload = data.payload;
+  if (data.title !== undefined) contextUpdates.title = data.title;
+  if (data.parentId !== undefined) contextUpdates.parentId = data.parentId;
 
-  let contextData = existing.contextData;
+  let contextData = existing;
   if (Object.keys(contextUpdates).length > 0) {
     const [updated] = await db
       .update(contextNodes)
       .set(contextUpdates)
-      .where(eq(contextNodes.nodeId, id))
+      .where(eq(contextNodes.id, id))
       .returning();
     contextData = updated;
   }
 
+  await updateNodeContextMetadata(contextData.nodeId);
   revalidatePath("/plans");
-  return { ...updatedNode, contextData };
+  return contextData;
 }
 
 /* ----------------------------------
@@ -240,7 +200,8 @@ export async function deleteContext(id: number): Promise<boolean> {
   const existing = await getContext(id);
   if (!existing) return false;
 
-  await db.delete(nodes).where(eq(nodes.id, id));
+  await db.delete(contextNodes).where(eq(contextNodes.id, id));
+  await updateNodeContextMetadata(existing.nodeId);
   revalidatePath("/plans");
   return true;
 }

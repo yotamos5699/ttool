@@ -6,7 +6,6 @@ import { pgEnum } from "drizzle-orm/pg-core";
  * ---------------------------------- */
 
 export const nodeTypeEnum = pgEnum("node_type", [
-  "plan",
   "stage",
   "job",
   "context",
@@ -19,10 +18,7 @@ export const nodeTypeEnum = pgEnum("node_type", [
  * How child nodes should be executed
  * ---------------------------------- */
 
-export const executionModeEnum = pgEnum("execution_mode", [
-  "sequential",
-  "parallel",
-]);
+export const executionModeEnum = pgEnum("execution_mode", ["sequential", "parallel"]);
 
 /* ----------------------------------
  * Context Type Enum
@@ -30,11 +26,10 @@ export const executionModeEnum = pgEnum("execution_mode", [
  * ---------------------------------- */
 
 export const contextTypeEnum = pgEnum("context_type", [
-  "requirement",
-  "constraint",
-  "decision",
-  "code",
-  "note",
+  "rule",
+  "skill",
+  "input",
+  "output",
 ]);
 
 /* ----------------------------------

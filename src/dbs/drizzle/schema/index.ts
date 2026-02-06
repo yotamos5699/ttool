@@ -3,11 +3,11 @@
 export * from "./enums";
 export * from "./tenants";
 export * from "./nodes";
+export * from "./plan-nodes";
 export * from "./plan-edges";
 
 // Subnode tables (type-specific data)
 export * from "./subnodes";
 
-// Execution and replan tables
-export * from "./execution";
+// Replan tables
 export * from "./replan";

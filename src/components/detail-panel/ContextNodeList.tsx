@@ -28,11 +28,10 @@ type ContextNodeListProps = {
 };
 
 const contextTypes = [
-  { value: "requirement", label: "Requirement", color: "bg-blue-500" },
-  { value: "constraint", label: "Constraint", color: "bg-red-500" },
-  { value: "decision", label: "Decision", color: "bg-green-500" },
-  { value: "code", label: "Code", color: "bg-purple-500" },
-  { value: "note", label: "Note", color: "bg-gray-500" },
+  { value: "rule", label: "Rule", color: "bg-blue-500" },
+  { value: "skill", label: "Skill", color: "bg-emerald-500" },
+  { value: "input", label: "Input", color: "bg-amber-500" },
+  { value: "output", label: "Output", color: "bg-purple-500" },
 ];
 
 function ContextNodeItem({ node }: { node: ContextNode }) {
@@ -44,7 +43,7 @@ function ContextNodeItem({ node }: { node: ContextNode }) {
 
   const { updateContext, deleteContext } = usePlanMutations();
 
-  const typeConfig = contextTypes.find((t) => t.value === node.type) || contextTypes[4];
+  const typeConfig = contextTypes.find((t) => t.value === node.type) || contextTypes[0];
 
   const handleSave = () => {
     updateContext.mutate({
@@ -178,7 +177,7 @@ export function ContextNodeList({
       targetType,
       targetId,
       title: "New Context",
-      type: "note",
+      type: "rule",
       payload: "",
     });
   };
@@ -210,8 +209,7 @@ export function ContextNodeList({
       )}
 
       <div className="text-xs text-muted-foreground">
-        Context nodes define requirements, constraints, decisions, code snippets, or notes
-        that guide planning.
+        Context nodes define rules, skills, inputs, and outputs that guide planning.
       </div>
     </div>
   );

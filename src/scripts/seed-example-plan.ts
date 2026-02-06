@@ -4,9 +4,7 @@ import { db } from "../dbs/drizzle";
 import {
   tenants,
   nodes,
-  planNodes,
-  stageNodes,
-  jobNodes,
+  plans,
   contextNodes,
   dataNodes,
   planEdges,
@@ -39,47 +37,56 @@ async function seedExamplePlan() {
   console.log(`Using tenant ID: ${tenantId}`);
 
   // ==========================================
-  // PLAN NODE
+  // PLAN + ROOT NODE
   // ==========================================
-  const [planNode] = await db
-    .insert(nodes)
+  const [plan] = await db
+    .insert(plans)
     .values({
-      type: "plan",
       name: "AI Code Review Pipeline",
-      path: "temp",
-      depth: 0,
-      parentId: null,
-      planId: null,
+      goal: "Automated code review with context-aware analysis, security scanning, and improvement suggestions",
+      version: 1,
+      parentVersion: null,
       tenantId,
+      active: true,
     })
     .returning();
 
-  // Update path and planId
-  const planPath = buildPath(null, "plan", planNode.id);
+  const [rootNode] = await db
+    .insert(nodes)
+    .values({
+      type: "stage",
+      name: plan.name,
+      path: "temp",
+      depth: 0,
+      parentId: null,
+      planId: plan.id,
+      tenantId,
+      executionMode: "sequential",
+      description: null,
+      disableDependencyInheritance: false,
+      includeDependencyIds: [],
+      excludeDependencyIds: [],
+    })
+    .returning();
+
+  const planPath = buildPath(null, "stage", rootNode.id);
   await db
     .update(nodes)
-    .set({ path: planPath, planId: planNode.id })
-    .where(eq(nodes.id, planNode.id));
+    .set({ path: planPath, depth: getPathDepth(planPath) })
+    .where(eq(nodes.id, rootNode.id));
 
-  // Insert plan-specific data
-  await db.insert(planNodes).values({
-    nodeId: planNode.id,
-    goal: "Automated code review with context-aware analysis, security scanning, and improvement suggestions",
-    version: 1,
-  });
+  await db.update(plans).set({ rootNodeId: rootNode.id }).where(eq(plans.id, plan.id));
 
-  console.log(`Created plan: ${planNode.name} (ID: ${planNode.id})`);
+  console.log(`Created plan: ${plan.name} (ID: ${plan.id})`);
 
   // ==========================================
   // PLAN-LEVEL CONTEXT NODES
   // ==========================================
-  const [ctx1] = await createContextNode({
-    tenantId,
-    planId: planNode.id,
-    parentId: planNode.id,
-    parentPath: planPath,
-    name: "Code Quality Standards",
-    contextType: "requirement",
+  await createContextNode({
+    nodeId: rootNode.id,
+    parentId: null,
+    title: "Code Quality Standards",
+    contextType: "rule",
     payload: JSON.stringify({
       minCoverage: 80,
       maxComplexity: 10,
@@ -88,13 +95,11 @@ async function seedExamplePlan() {
     }),
   });
 
-  const [ctx2] = await createContextNode({
-    tenantId,
-    planId: planNode.id,
-    parentId: planNode.id,
-    parentPath: planPath,
-    name: "Resource Limits",
-    contextType: "constraint",
+  await createContextNode({
+    nodeId: rootNode.id,
+    parentId: null,
+    title: "Resource Limits",
+    contextType: "rule",
     payload: JSON.stringify({
       maxExecutionTime: "5m",
       maxMemory: "2GB",
@@ -109,8 +114,8 @@ async function seedExamplePlan() {
   // ==========================================
   const [stage1, stage1Path] = await createStageNode({
     tenantId,
-    planId: planNode.id,
-    parentId: planNode.id,
+    planId: plan.id,
+    parentId: rootNode.id,
     parentPath: planPath,
     name: "Code Ingestion",
     description: "Fetch and prepare code for analysis",
@@ -119,19 +124,17 @@ async function seedExamplePlan() {
 
   // Stage 1 context
   await createContextNode({
-    tenantId,
-    planId: planNode.id,
-    parentId: stage1.id,
-    parentPath: stage1Path,
-    name: "Supported VCS",
-    contextType: "note",
+    nodeId: stage1.id,
+    parentId: null,
+    title: "Supported VCS",
+    contextType: "input",
     payload: "GitHub, GitLab, Bitbucket, local git repos",
   });
 
   // Stage 1 jobs
   const [job1_1, job1_1Path] = await createJobNode({
     tenantId,
-    planId: planNode.id,
+    planId: plan.id,
     parentId: stage1.id,
     parentPath: stage1Path,
     name: "Clone Repository",
@@ -141,7 +144,7 @@ async function seedExamplePlan() {
 
   const [job1_2, job1_2Path] = await createJobNode({
     tenantId,
-    planId: planNode.id,
+    planId: plan.id,
     parentId: stage1.id,
     parentPath: stage1Path,
     name: "Detect Languages",
@@ -151,7 +154,7 @@ async function seedExamplePlan() {
 
   const [job1_3] = await createJobNode({
     tenantId,
-    planId: planNode.id,
+    planId: plan.id,
     parentId: stage1.id,
     parentPath: stage1Path,
     name: "Parse AST",
@@ -164,8 +167,8 @@ async function seedExamplePlan() {
 
   const [stage2, stage2Path] = await createStageNode({
     tenantId,
-    planId: planNode.id,
-    parentId: planNode.id,
+    planId: plan.id,
+    parentId: rootNode.id,
     parentPath: planPath,
     name: "AI-Powered Analysis",
     description: "Use LLMs for deep code understanding",
@@ -174,12 +177,10 @@ async function seedExamplePlan() {
   });
 
   await createContextNode({
-    tenantId,
-    planId: planNode.id,
-    parentId: stage2.id,
-    parentPath: stage2Path,
-    name: "Analysis Prompt Template",
-    contextType: "code",
+    nodeId: stage2.id,
+    parentId: null,
+    title: "Analysis Prompt Template",
+    contextType: "input",
     payload: `You are a senior code reviewer. Analyze the following code for:
 1. Code quality and maintainability
 2. Potential bugs and edge cases
@@ -191,7 +192,7 @@ Provide specific, actionable feedback with code examples where appropriate.`,
 
   const [job2_1, job2_1Path] = await createJobNode({
     tenantId,
-    planId: planNode.id,
+    planId: plan.id,
     parentId: stage2.id,
     parentPath: stage2Path,
     name: "Code Quality Assessment",
@@ -200,12 +201,10 @@ Provide specific, actionable feedback with code examples where appropriate.`,
   });
 
   await createContextNode({
-    tenantId,
-    planId: planNode.id,
-    parentId: job2_1.id,
-    parentPath: job2_1Path,
-    name: "Model Configuration",
-    contextType: "constraint",
+    nodeId: job2_1.id,
+    parentId: null,
+    title: "Model Configuration",
+    contextType: "rule",
     payload: JSON.stringify({
       model: "claude-3-5-sonnet",
       temperature: 0.3,
@@ -215,7 +214,7 @@ Provide specific, actionable feedback with code examples where appropriate.`,
 
   const [job2_2] = await createJobNode({
     tenantId,
-    planId: planNode.id,
+    planId: plan.id,
     parentId: stage2.id,
     parentPath: stage2Path,
     name: "Bug Detection",
@@ -225,7 +224,7 @@ Provide specific, actionable feedback with code examples where appropriate.`,
 
   await createJobNode({
     tenantId,
-    planId: planNode.id,
+    planId: plan.id,
     parentId: stage2.id,
     parentPath: stage2Path,
     name: "Improvement Suggestions",
@@ -241,7 +240,7 @@ Provide specific, actionable feedback with code examples where appropriate.`,
   // Input data node for stage 1
   await createDataNode({
     tenantId,
-    planId: planNode.id,
+    planId: plan.id,
     parentId: stage1.id,
     parentPath: stage1Path,
     name: "Repository URL Input",
@@ -255,7 +254,7 @@ Provide specific, actionable feedback with code examples where appropriate.`,
   // Output data node for stage 1
   await createDataNode({
     tenantId,
-    planId: planNode.id,
+    planId: plan.id,
     parentId: stage1.id,
     parentPath: stage1Path,
     name: "AST Artifacts Output",
@@ -268,7 +267,7 @@ Provide specific, actionable feedback with code examples where appropriate.`,
   // Input data node for AI analysis stage
   await createDataNode({
     tenantId,
-    planId: planNode.id,
+    planId: plan.id,
     parentId: stage2.id,
     parentPath: stage2Path,
     name: "Code Chunks Input",
@@ -281,7 +280,7 @@ Provide specific, actionable feedback with code examples where appropriate.`,
   // Output data node for AI analysis stage
   await createDataNode({
     tenantId,
-    planId: planNode.id,
+    planId: plan.id,
     parentId: stage2.id,
     parentPath: stage2Path,
     name: "AI Findings Output",
@@ -327,15 +326,15 @@ Provide specific, actionable feedback with code examples where appropriate.`,
   // SUMMARY
   // ==========================================
   console.log("\n=== Seed Complete ===");
-  console.log(`Plan ID: ${planNode.id}`);
-  console.log(`Plan Name: ${planNode.name}`);
+  console.log(`Plan ID: ${plan.id}`);
+  console.log(`Plan Name: ${plan.name}`);
   console.log("Structure:");
   console.log("  - Part 1: Code Ingestion (3 jobs)");
   console.log("  - Part 2: AI-Powered Analysis (3 jobs)");
   console.log("\nContext Nodes: plan-level (2), part-level (2), job-level (1)");
   console.log("Data Nodes: 4 configured");
 
-  return planNode;
+  return plan;
 }
 
 // ==========================================
@@ -364,6 +363,8 @@ async function createStageNode(params: {
       parentId: params.parentId,
       planId: params.planId,
       tenantId: params.tenantId,
+      description: params.description ?? null,
+      executionMode: params.executionMode ?? "sequential",
       includeDependencyIds: params.includeDependencyIds ?? [],
       excludeDependencyIds: params.excludeDependencyIds ?? [],
       disableDependencyInheritance: params.disableDependencyInheritance ?? false,
@@ -373,16 +374,7 @@ async function createStageNode(params: {
   const path = buildPath(params.parentPath, "stage", node.id);
   const depth = getPathDepth(path);
 
-  await db
-    .update(nodes)
-    .set({ path, depth })
-    .where(eq(nodes.id, node.id));
-
-  await db.insert(stageNodes).values({
-    nodeId: node.id,
-    description: params.description ?? null,
-    executionMode: params.executionMode ?? "sequential",
-  });
+  await db.update(nodes).set({ path, depth }).where(eq(nodes.id, node.id));
 
   return [{ ...node, path, depth }, path];
 }
@@ -408,6 +400,7 @@ async function createJobNode(params: {
       parentId: params.parentId,
       planId: params.planId,
       tenantId: params.tenantId,
+      description: params.description ?? null,
       includeDependencyIds: params.includeDependencyIds ?? [],
       excludeDependencyIds: params.excludeDependencyIds ?? [],
       disableDependencyInheritance: params.disableDependencyInheritance ?? false,
@@ -417,56 +410,30 @@ async function createJobNode(params: {
   const path = buildPath(params.parentPath, "job", node.id);
   const depth = getPathDepth(path);
 
-  await db
-    .update(nodes)
-    .set({ path, depth })
-    .where(eq(nodes.id, node.id));
-
-  await db.insert(jobNodes).values({
-    nodeId: node.id,
-    description: params.description ?? null,
-  });
+  await db.update(nodes).set({ path, depth }).where(eq(nodes.id, node.id));
 
   return [{ ...node, path, depth }, path];
 }
 
 async function createContextNode(params: {
-  tenantId: number;
-  planId: number;
-  parentId: number;
-  parentPath: string;
-  name: string;
-  contextType: "requirement" | "constraint" | "decision" | "code" | "note";
+  nodeId: number;
+  parentId: number | null;
+  title: string;
+  contextType: "rule" | "skill" | "input" | "output";
   payload: string;
-}): Promise<[typeof nodes.$inferSelect, string]> {
-  const [node] = await db
-    .insert(nodes)
+}): Promise<typeof contextNodes.$inferSelect> {
+  const [context] = await db
+    .insert(contextNodes)
     .values({
-      type: "context",
-      name: params.name,
-      path: "temp",
-      depth: 0,
+      nodeId: params.nodeId,
       parentId: params.parentId,
-      planId: params.planId,
-      tenantId: params.tenantId,
+      title: params.title,
+      contextType: params.contextType,
+      payload: params.payload,
     })
     .returning();
 
-  const path = buildPath(params.parentPath, "context", node.id);
-  const depth = getPathDepth(path);
-
-  await db
-    .update(nodes)
-    .set({ path, depth })
-    .where(eq(nodes.id, node.id));
-
-  await db.insert(contextNodes).values({
-    nodeId: node.id,
-    contextType: params.contextType,
-    payload: params.payload,
-  });
-
-  return [{ ...node, path, depth }, path];
+  return context;
 }
 
 async function createDataNode(params: {
@@ -493,10 +460,7 @@ async function createDataNode(params: {
   const path = buildPath(params.parentPath, "data", node.id);
   const depth = getPathDepth(path);
 
-  await db
-    .update(nodes)
-    .set({ path, depth })
-    .where(eq(nodes.id, node.id));
+  await db.update(nodes).set({ path, depth }).where(eq(nodes.id, node.id));
 
   await db.insert(dataNodes).values({
     nodeId: node.id,

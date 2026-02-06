@@ -1,4 +1,10 @@
-import type { Node, NodeType, PlanEdge } from "@/dbs/drizzle/schema";
+import type {
+  Node,
+  NodeType,
+  PlanEdge,
+  ContextNode as DbContextNode,
+  PlanSelect,
+} from "@/dbs/drizzle/schema";
 import { buildPath, getPathDepth } from "./ltree";
 import type {
   Plan,
@@ -201,12 +207,9 @@ export function applyDependencyFilters(
  * This bridges the new flat node schema with the existing store/components
  */
 export function nodesToPlan(params: {
-  planNode: Node;
+  plan: PlanSelect;
   nodes: Node[];
-  planData?: { goal: string; version: number; parentVersion: number | null };
-  contextDataByNodeId: Map<number, { contextType: string; payload: string }>;
-  stageDataByNodeId: Map<number, { description: string | null; executionMode: string }>;
-  jobDataByNodeId: Map<number, { description: string | null }>;
+  contextNodes: DbContextNode[];
   dataDataByNodeId: Map<number, { payload: unknown }>;
   planEdges: PlanEdge[];
 }): Plan {
@@ -215,27 +218,29 @@ export function nodesToPlan(params: {
     nodeMap.set(node.id, node);
   }
 
+  const rootNode = params.plan.rootNodeId
+    ? (nodeMap.get(params.plan.rootNodeId) ?? null)
+    : null;
+
   const groups = groupNodesByType(params.nodes);
   const nodesByType: Record<string, number[]> = {};
   for (const [type, items] of Object.entries(groups)) {
     nodesByType[type] = items.map((node) => node.id);
   }
 
-  const contextByParent = new Map<number, StoreContextNode[]>();
-  for (const ctx of groups.context ?? []) {
-    const parentId = ctx.parentId;
-    if (!parentId) continue;
-    const ctxData = params.contextDataByNodeId.get(ctx.id);
+  const contextByNodeId = new Map<number, StoreContextNode[]>();
+  for (const ctx of params.contextNodes) {
     const contextNode: StoreContextNode = {
       id: ctx.id,
-      level: String(ctx.type),
-      type: ctxData?.contextType ?? "note",
-      title: ctx.name,
-      payload: ctxData?.payload ?? "",
+      level: "context",
+      type: ctx.contextType,
+      title: ctx.title,
+      payload: ctx.payload,
+      parentId: ctx.parentId ?? null,
     };
-    const list = contextByParent.get(parentId) ?? [];
+    const list = contextByNodeId.get(ctx.nodeId) ?? [];
     list.push(contextNode);
-    contextByParent.set(parentId, list);
+    contextByNodeId.set(ctx.nodeId, list);
   }
 
   const dataNodesByParent = new Map<number, number[]>();
@@ -263,71 +268,57 @@ export function nodesToPlan(params: {
     role: edge.role ?? undefined,
   }));
 
-  const jobMap = new Map<number, StorePlanNode>();
-
-  for (const jobNode of groups.job ?? []) {
-    const jobData = params.jobDataByNodeId.get(jobNode.id);
-    const job: StorePlanNode = {
-      id: jobNode.id,
-      type: "job",
-      title: jobNode.name,
-      description: jobData?.description ?? null,
-      childNodes: [],
-      contextNodes: contextByParent.get(jobNode.id) ?? [],
-      dependencies: dependenciesByNodeId.get(jobNode.id) ?? {
-        includeDependencyIds: [],
-        excludeDependencyIds: [],
-        disableDependencyInheritance: false,
-      },
-      dataNodeIds: dataNodesByParent.get(jobNode.id) ?? [],
-    };
-    jobMap.set(jobNode.id, job);
-  }
-
-  const buildPlanNodeTree = (parentId: number): StorePlanNode[] => {
+  const buildPlanNodeTree = (parentId: number | null): StorePlanNode[] => {
     const children = params.nodes.filter((node) => node.parentId === parentId);
     return children.map((child) => {
-      const ctx = contextByParent.get(child.id) ?? [];
+      const ctx = contextByNodeId.get(child.id) ?? [];
       const dataNodeIds = dataNodesByParent.get(child.id) ?? [];
       const deps = dependenciesByNodeId.get(child.id) ?? {
         includeDependencyIds: [],
         excludeDependencyIds: [],
         disableDependencyInheritance: false,
       };
-      const stageData = params.stageDataByNodeId.get(child.id);
-      const jobData = params.jobDataByNodeId.get(child.id);
-      const description = stageData?.description ?? jobData?.description ?? null;
 
       return {
         id: child.id,
         type: child.type as "stage" | "job" | "context" | "data",
         title: child.name,
-        description,
-        executionMode: stageData?.executionMode as "sequential" | "parallel" | undefined,
+        description: child.description ?? null,
+        executionMode: child.executionMode ?? undefined,
         contextNodes: ctx,
         dataNodeIds,
         dependencies: deps,
         childNodes: buildPlanNodeTree(child.id),
+        lastUpdatedAt: child.lastUpdatedAt,
       };
     });
   };
 
-  const planDependencies = dependenciesByNodeId.get(params.planNode.id) ?? {
-    includeDependencyIds: [],
-    excludeDependencyIds: [],
-    disableDependencyInheritance: false,
-  };
+  const planDependencies = rootNode
+    ? (dependenciesByNodeId.get(rootNode.id) ?? {
+        includeDependencyIds: [],
+        excludeDependencyIds: [],
+        disableDependencyInheritance: false,
+      })
+    : {
+        includeDependencyIds: [],
+        excludeDependencyIds: [],
+        disableDependencyInheritance: false,
+      };
 
   return {
-    id: params.planNode.id,
-    name: params.planNode.name,
-    goal: params.planData?.goal ?? "",
-    version: params.planData?.version ?? 1,
-    parentVersion: params.planData?.parentVersion ?? null,
-    parts: buildPlanNodeTree(params.planNode.id),
-    contextNodes: contextByParent.get(params.planNode.id) ?? [],
+    id: params.plan.id,
+    tenantId: params.plan.tenantId,
+    name: params.plan.name,
+    goal: params.plan.goal,
+    version: params.plan.version,
+    parentVersion: params.plan.parentVersion ?? null,
+    rootNodeId: params.plan.rootNodeId ?? null,
+    rootNodeLastUpdatedAt: rootNode?.lastUpdatedAt,
+    parts: rootNode ? buildPlanNodeTree(rootNode.id) : buildPlanNodeTree(null),
+    contextNodes: rootNode ? (contextByNodeId.get(rootNode.id) ?? []) : [],
     dependencies: planDependencies,
-    dataNodeIds: dataNodesByParent.get(params.planNode.id) ?? [],
+    dataNodeIds: rootNode ? (dataNodesByParent.get(rootNode.id) ?? []) : [],
     edges,
     nodesByType,
   };
